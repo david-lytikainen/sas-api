@@ -1,5 +1,4 @@
 from app import db
-from datetime import datetime
 from .enums import EventStatus
 
 class Event(db.Model):
