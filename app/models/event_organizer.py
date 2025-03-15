@@ -1,4 +1,4 @@
-from app import db
+from app.extensions import db
 
 class EventOrganizer(db.Model):
     __tablename__ = 'events_organizers'

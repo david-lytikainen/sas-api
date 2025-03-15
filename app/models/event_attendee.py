@@ -1,4 +1,4 @@
-from app import db
+from app.extensions import db
 from .enums import RegistrationStatus
 
 class EventAttendee(db.Model):

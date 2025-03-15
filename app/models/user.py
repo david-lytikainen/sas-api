@@ -1,4 +1,4 @@
-from app import db
+from app.extensions import db
 from .enums import Gender
 
 class User(db.Model):
