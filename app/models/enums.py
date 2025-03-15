@@ -10,4 +10,9 @@ class EventStatus(Enum):
 class Gender(Enum):
     MALE = 'male'
     FEMALE = 'female'
+
+class RegistrationStatus(Enum):
+    REGISTERED = 'registered'
+    CHECKED_IN = 'checked_in'
+    CANCELLED = 'cancelled'
     
