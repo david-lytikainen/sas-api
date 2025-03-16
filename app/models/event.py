@@ -1,5 +1,4 @@
-from app import db
-from datetime import datetime
+from app.extensions import db
 from .enums import EventStatus
 
 class Event(db.Model):
