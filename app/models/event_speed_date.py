@@ -7,6 +7,8 @@ class EventSpeedDate(db.Model):
     event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False)
     male_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     female_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    male_interested = db.Column(db.Boolean, nullable=True)
+    female_interested = db.Column(db.Boolean, nullable=True)
     table_number = db.Column(db.Integer, nullable=False)
     round_number = db.Column(db.Integer, nullable=False)
     
