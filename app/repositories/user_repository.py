@@ -3,7 +3,7 @@ from app.models import User
 
 class UserRepository:
     @staticmethod
-    def create_user(user):
+    def sign_up(user):
         db.session.add(user)
         db.session.commit()
         return user
