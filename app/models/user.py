@@ -16,6 +16,7 @@ class User(db.Model):
     age = db.Column(db.Integer, nullable=False)
     church_id = db.Column(db.Integer, db.ForeignKey('churches.id'), nullable=True)
     denomination_id = db.Column(db.Integer, db.ForeignKey('denominations.id'), nullable=True)
+    denomination = db.Column(db.String(100), nullable=False)
     updated_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
     created_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())
 
@@ -33,6 +34,7 @@ class User(db.Model):
             'denomination_id': self.denomination_id,
             'church': self.church.name if self.church_id and hasattr(self, 'church') and self.church else None,
             'denomination': self.denomination.name if self.denomination_id and hasattr(self, 'denomination') and self.denomination else None,
+            'denomination_custom': self.denomination,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

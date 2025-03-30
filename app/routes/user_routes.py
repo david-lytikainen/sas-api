@@ -14,7 +14,7 @@ def sign_up():
             return jsonify({"error": "No data provided"}), 400
         
         required_fields = ['email', 'password', 'role_id', 'first_name', 
-                        'last_name', 'phone', 'gender', 'age']
+                        'last_name', 'phone', 'gender', 'age', 'denomination']
         missing_fields = [field for field in required_fields if field not in user_data]
         
         if missing_fields:

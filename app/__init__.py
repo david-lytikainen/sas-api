@@ -3,6 +3,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 from app.extensions import db, migrate, jwt
+from datetime import timedelta
 
 # Load environment variables
 load_dotenv()
@@ -10,34 +11,26 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
     
+    # Configure CORS
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": ["http://localhost:3000", "http://172.16.225.58:3000"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True
+        }
+    })
+
     # Configure database
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/sas_db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     # Configure JWT
-    app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 86400  # 24 hours
+    app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key')
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)
     app.config['JWT_TOKEN_LOCATION'] = ['headers']
     app.config['JWT_HEADER_NAME'] = 'Authorization'
     app.config['JWT_HEADER_TYPE'] = 'Bearer'
-    
-    # Simplest possible CORS configuration
-    app.config['CORS_HEADERS'] = 'Content-Type'
-    CORS(app, origins=['http://localhost:3000', 'http://localhost:3001'], 
-         allow_credentials=True, 
-         automatic_options=True,
-         supports_credentials=True)
-
-    # Add CORS headers to every response
-    @app.after_request
-    def add_cors_headers(response):
-        origin = request.headers.get('Origin')
-        if origin in ['http://localhost:3000', 'http://localhost:3001']:
-            response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
-        return response
     
     # Initialize Flask extensions
     db.init_app(app)
@@ -47,11 +40,13 @@ def create_app():
     # Register blueprints
     from app.routes.user_routes import user_bp
     from app.routes.event_routes import event_bp
+    from app.routes.matches_routes import matches_bp
     app.register_blueprint(user_bp, url_prefix='/api/user')
     app.register_blueprint(event_bp, url_prefix='/api')
+    app.register_blueprint(matches_bp, url_prefix='/api')
     
     # Add health check endpoint
-    @app.route('/health', methods=['GET'])
+    @app.route('/api/health', methods=['GET'])
     def health_check():
         return {"status": "ok", "message": "API is running"}
     
