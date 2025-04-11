@@ -10,7 +10,7 @@ from app.models.event import Event
 from app.models.event_attendee import EventAttendee
 from app.models.event_speed_date import EventSpeedDate
 from datetime import datetime, timedelta
-from random import randint
+from random import randint, randrange
 
 app = create_app()
 
@@ -28,7 +28,7 @@ def create_test_users():
             last_name=f"Test{i+1}",
             phone=f"+1555000{str(i+1).zfill(4)}",
             gender=Gender.MALE,
-            age=randint(22, 30),  # We can randomize this if needed
+            birthday=random_birthday(20,30),
             church_id=None,  # Optional
             denomination_id=None  # Optional
         )
@@ -44,7 +44,7 @@ def create_test_users():
             last_name=f"Test{i+1}",
             phone=f"+1555111{str(i+1).zfill(4)}",
             gender=Gender.FEMALE,
-            age=randint(22, 30),  # We can randomize this if needed
+            birthday=random_birthday(20,30),
             church_id=None,  # Optional
             denomination_id=None  # Optional
         )
@@ -56,6 +56,13 @@ def create_test_users():
     
     print(f"Created {len(test_users)} test users ({12} males, {17} females)")
     return test_users
+
+def random_birthday(min_age, max_age):
+    today = datetime.now()
+    start_date = today.replace(year=today.year - max_age)
+    end_date = today.replace(year=today.year - min_age)
+    random_date = start_date + timedelta(days=randrange((end_date - start_date).days))
+    return random_date.date()
 
 def create_test_event(creator_id):
     """Create a test event for speed dating"""

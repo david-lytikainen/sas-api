@@ -2,145 +2,79 @@ from typing import List, Dict
 from app.models.user import User
 from app.models.enums import Gender
 from app.models.event_speed_date import EventSpeedDate
+from app.services.event_attendee_service import EventAttendeeService
+import math
 from app.extensions import db
 
 class SpeedDateMatcher:
-    def __init__(self, event_id: int):
-        self.event_id = event_id
-        self.male_attendees = []
-        self.female_attendees = []
 
-    def find_all_possible_matches(self, males: List[User], females: List[User], 
-                                min_dates: int,
-                                initial_age_range: int = 3,
-                                extended_age_range: int = 5) -> Dict[int, List[User]]:
+    @staticmethod
+    def find_all_potential_dates(males: List[User], 
+                                  females: List[User], 
+                                  initial_age_range: int = 3, 
+                                  extended_age_range: int = 4) -> Dict[int, List[User]]:
         """
-        Find all possible matches for each participant based on age compatibility.
-        Ensures each person has at least min_dates potential matches.
-        
-        Args:
-            males: List of male participants
-            females: List of female participants
-            min_dates: Minimum number of dates each person should have
-            initial_age_range: Initial maximum age difference allowed (default ±3 years)
-            extended_age_range: Extended age range if initial is too restrictive (default ±5 years)
-            
-        Returns:
-            Dictionary mapping each participant's ID to a list of compatible Users
+        Find all potential matches for each attendee.
+        +-3 years age difference (+-4 years if they don't have the threshold amount of potential dates)
+        Each attendee's list of potential dates is sorted based on closeness of age to the attendee
         """
-        all_matches = {}
+        all_dates = {}
         
-        # Initialize matches for all participants
-        for participant in males + females:
-            all_matches[participant.id] = []
+        # Initialize matches for all attendees
+        for attendee in males + females:
+            all_dates[attendee.id] = []
         
-        # Find matches for each participant
-        for participant in males + females:
-            # Determine which group to match with
-            potential_matches = females if participant.gender == Gender.MALE else males
+        # Find matches for each attendee
+        for attendee in males + females:
+            potential_dates = females if attendee.gender == Gender.MALE else males
             
             # Try with initial age range
-            compatible_matches = [
-                match for match in potential_matches
-                if abs(participant.age - match.age) <= initial_age_range
+            compatible_dates = [
+                match for match in potential_dates
+                if abs(attendee.calculate_age() - match.calculate_age()) <= initial_age_range
             ]
             
             # If not enough matches, try extended age range
-            if len(compatible_matches) < min_dates:
-                compatible_matches = [
-                    match for match in potential_matches
-                    if abs(participant.age - match.age) <= extended_age_range
+            if len(compatible_dates) < SpeedDateMatcher.min_dates_threshold(len(potential_dates)):
+                compatible_dates = [
+                    match for match in potential_dates
+                    if abs(attendee.age - match.age) <= extended_age_range
                 ]
             
             # Sort matches by age difference
-            compatible_matches.sort(key=lambda x: abs(x.age - participant.age))
-            
-            # Store matches
-            all_matches[participant.id] = compatible_matches
+            compatible_dates.sort(key=lambda x: abs(x.calculate_age() - attendee.calculate_age()))
+            all_dates[attendee.id] = compatible_dates
         
-        return all_matches
-
-    def create_date_schedule(self, males: List[User], females: List[User], 
-                           min_dates: int, max_dates: int, num_tables: int) -> List[EventSpeedDate]:
-        """
-        Create a schedule of dates ensuring each person gets between min_dates and max_dates.
-        Prioritizes participants with fewer potential matches.
-        
-        Args:
-            males: List of male participants
-            females: List of female participants
-            min_dates: Minimum number of dates each person should have
-            max_dates: Maximum number of dates each person can have
-            num_tables: Number of tables available for each round
-            
-        Returns:
-            List of created EventSpeedDate records
-        """
-        # Get all possible matches
-        all_matches = self.find_all_possible_matches(males, females, min_dates)
-        
-        # Initialize schedule and tracking
-        speed_dates = []
-        dates_per_participant = {p.id: 0 for p in males + females}  # Track dates for everyone
-        used_pairs = set()  # Track which pairs have already met
-        
-        # Sort participants by number of potential matches (ascending)
-        participants = males + females
-        participants.sort(key=lambda p: len(all_matches[p.id]))
-        
-        # Create schedule round by round
-        current_round = 1
-        while any(dates < min_dates for dates in dates_per_participant.values()):
-            tables_used = 0  # Track number of tables used in current round
-            
-            # Try to schedule dates for each participant
-            for participant in participants:
-                # Skip if we've used all tables in this round
-                if tables_used >= num_tables:
-                    break
-                    
-                # Skip if participant has reached max dates
-                if dates_per_participant[participant.id] >= max_dates:
-                    continue
-                    
-                # Get available matches for this participant
-                available_matches = [
-                    match for match in all_matches[participant.id]
-                    if dates_per_participant[match.id] < max_dates
-                    and (participant.id, match.id) not in used_pairs
-                ]
-                
-                if available_matches:
-                    # Take the first available match (they're already sorted by age difference)
-                    match = available_matches[0]
-                    
-                    # Create EventSpeedDate record
-                    speed_date = EventSpeedDate(
-                        event_id=self.event_id,
-                        male_id=participant.id if participant.gender == Gender.MALE else match.id,
-                        female_id=match.id if participant.gender == Gender.MALE else participant.id,
-                        table_number=tables_used + 1,  # Tables start at 1
-                        round_number=current_round
-                    )
-                    speed_dates.append(speed_date)
-                    
-                    # Update tracking
-                    dates_per_participant[participant.id] += 1
-                    dates_per_participant[match.id] += 1
-                    used_pairs.add((participant.id, match.id))
-                    tables_used += 1
-            
-            current_round += 1
-            
-            # Break if we've gone too many rounds without progress
-            if current_round > (max_dates * 2):  # Safety break
-                break
-        
-        # Save all speed dates to the database
-        db.session.add_all(speed_dates)
-        db.session.commit()
-        
-        return speed_dates
+        return all_dates
+    
+    @staticmethod
+    def min_dates_threshold(num_potential_matches: int) -> int:
+        # The threshold is num of opposite gender * .25
+        return math.ceil(num_potential_matches * .25)
 
     
+
+
+
+    @staticmethod
+    def test_find_all():
+        from app import create_app
         
+        app = create_app()  # Or however you initialize your Flask app
+        
+        with app.app_context():
+            attendees = EventAttendeeService.get_checked_in_attendees(3)
+            attendees.sort(key= lambda a: a.calculate_age())
+            
+            males = [user for user in attendees if user.gender == Gender.MALE]
+            females = [user for user in attendees if user.gender == Gender.FEMALE]
+            
+            print(f"Found {len(males)} males and {len(females)} females")
+            matches = SpeedDateMatcher.find_all_potential_dates(males, females)
+
+            print([attendee.calculate_age() for attendee in attendees])
+            print("\n\n\n\n")
+            print(matches)
+
+if __name__ == '__main__':
+    SpeedDateMatcher.test_find_all()
