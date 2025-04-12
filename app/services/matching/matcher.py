@@ -4,6 +4,7 @@ from app.models.enums import Gender
 from app.models.event_speed_date import EventSpeedDate
 from app.services.event_attendee_service import EventAttendeeService
 import math
+from flask import current_app
 from app.extensions import db
 
 class SpeedDateMatcher:
@@ -64,15 +65,17 @@ class SpeedDateMatcher:
                             id_to_user: Dict[int, User], 
                             event_id: int,
                             num_tables: int, 
-                            num_rounds: int):
-        # holds every speed date with each user id, round number, and table number
+                            num_rounds: int) -> List[EventSpeedDate]:
+        """
+        Creates every single speed date for this event.
+        Returns:
+            list of all speed dates for the night
+        """
         event_speed_dates: List[EventSpeedDate] = []
-
-        # tracks how many rounds each attendee has participated in
         rounds_completed_per_attendee: Dict[int, int] = {k:0 for k,_ in all_compatible_dates.items()}
-        print(rounds_completed_per_attendee)
 
         for current_round in range(1, num_rounds+1):
+            current_app.logger.info("Filling up all tables for ROUND %d\n\n", current_round)
             # Sort attendees by number of rounds participated in then by most potential dates
             sorted_attendees = sorted(
                 all_compatible_dates,
@@ -95,7 +98,7 @@ class SpeedDateMatcher:
                 for compatible_date in sorted_compatible_dates:
                     if compatible_date.id not in attendees_seated_this_round:
                         male_id   = attendee_id if attendee.gender == Gender.MALE else compatible_date.id
-                        female_id = attendee_id if attendee.gender == Gender.MALE else compatible_date.id
+                        female_id = attendee_id if attendee.gender == Gender.FEMALE else compatible_date.id
 
                         # set attendee and compatible_date to have a table this round.
                         SpeedDateMatcher.assign_table(event_speed_dates, event_id, male_id, female_id, table_number, current_round)
@@ -110,10 +113,14 @@ class SpeedDateMatcher:
                         all_compatible_dates[attendee_id].remove(compatible_date)
                         if attendee in all_compatible_dates[compatible_date.id]:
                             all_compatible_dates[compatible_date.id].remove(attendee)
+                        break # this attendee has a date this round. moving on to next...
+
 
                 if table_number > num_tables:
-                    break # all tables are filled this round
+                    current_app.logger.info("All tables are filled for ROUND %d\n\n", current_round)
+                    break
 
+        return event_speed_dates
         # TODO later: try to keep people at same table
 
     @staticmethod
@@ -132,29 +139,25 @@ class SpeedDateMatcher:
         event_speed_dates.append(event_speed_date)
 
     @staticmethod
-    def test_find_all():
+    def test():
         from app import create_app
         
         app = create_app()  # Or however you initialize your Flask app
         
         with app.app_context():
-            attendees = EventAttendeeService.get_checked_in_attendees(3)
-            attendees.sort(key= lambda a: a.calculate_age())
+            mock_event_id = 3
+            mock_num_tables = 10
+            mock_num_rounds = 10
+            attendees = EventAttendeeService.get_checked_in_attendees(mock_event_id)
             
             males = [user for user in attendees if user.gender == Gender.MALE]
             females = [user for user in attendees if user.gender == Gender.FEMALE]
             
-            print(f"Found {len(males)} males and {len(females)} females")
-            all_compatible_dates = SpeedDateMatcher.find_all_potential_dates(males, females, 10, 10)
-
-            print([attendee.calculate_age() for attendee in attendees])
-            print("\n\n\n\n")
-
-            all_attendees_ids = sorted(all_compatible_dates, key=lambda pid: len(all_compatible_dates[pid]), reverse=True)
-            all_attendees_num_potential = [len(all_compatible_dates[id]) for id in all_attendees_ids]
-            print(all_attendees_ids)
-            print(all_attendees_num_potential)
-            print(all_compatible_dates[64])
+            (all_compatible_dates, id_to_user) = SpeedDateMatcher.find_all_potential_dates(males, females, mock_num_tables, mock_num_rounds)
+            event_speed_dates = SpeedDateMatcher.finalize_all_rounds(all_compatible_dates, id_to_user, 
+                                                                     mock_event_id, mock_num_tables, mock_num_rounds)
+            
 
 if __name__ == '__main__':
-    SpeedDateMatcher.test_find_all()
+    SpeedDateMatcher.test()
+

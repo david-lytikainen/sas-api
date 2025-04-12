@@ -32,9 +32,9 @@ class User(db.Model):
         return (
             f"User("
             f"id={self.id}, "
+            f"age={self.calculate_age()}, "
             f"first_name='{self.first_name}', "
             f"last_name='{self.last_name}', "
-            f"gender={self.gender}, "
-            f"age={self.calculate_age()}, "
+            f"gender={self.gender}"
             f")\n"
         )
