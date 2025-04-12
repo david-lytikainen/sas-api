@@ -22,6 +22,11 @@ class User(db.Model):
     def calculate_age(self):
         today = date.today()
         return today.year - self.birthday.year - ((today.month, today.day) < (self.birthday.month, self.birthday.day)) 
+    
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, User):
+            return self.id == other.id
+        return False
 
     def __repr__(self):
         return (
