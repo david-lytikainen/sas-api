@@ -11,4 +11,5 @@ class EventSpeedDate(db.Model):
     female_interested = db.Column(db.Boolean, nullable=True)
     table_number = db.Column(db.Integer, nullable=False)
     round_number = db.Column(db.Integer, nullable=False)
-    
+
+
