@@ -38,3 +38,22 @@ class User(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+    def __repr__(self):
+        return (
+            f"User("
+            f"id={self.id}, "
+            f"role_id={self.role_id}, "
+            f"email='{self.email}', "
+            f"password='{self.password}', "
+            f"first_name='{self.first_name}', "
+            f"last_name='{self.last_name}', "
+            f"phone='{self.phone}', "
+            f"gender={self.gender}, "
+            f"age={self.age}, "
+            f"church_id={self.church_id}, "
+            f"denomination_id={self.denomination_id}, "
+            f"updated_at={self.updated_at}, "
+            f"created_at={self.created_at}"
+            f")"
+        )

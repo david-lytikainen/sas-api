@@ -13,3 +13,16 @@ class EventAttendee(db.Model):
     updated_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
     created_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())
     
+    def __repr__(self):
+        return (
+            f"EventAttendee("
+            f"id={self.id}, "
+            f"event_id={self.event_id}, "
+            f"user_id={self.user_id}, "
+            f"status={self.status}, "
+            f"registration_date={self.registration_date}, "
+            f"check_in_date={self.check_in_date}, "
+            f"updated_at={self.updated_at}, "
+            f"created_at={self.created_at}"
+            f")"
+        )
