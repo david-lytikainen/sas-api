@@ -18,7 +18,6 @@ class SpeedDateMatcher:
         """
         Find all potential matches for each attendee.
         +-3 years age difference (+-4 years if they don't have the threshold amount of potential dates)
-        Each attendee's list of potential dates is sorted based on closeness of age to the attendee
         """
         all_compatible_dates = {}
         id_to_user = {}
@@ -105,9 +104,9 @@ class SpeedDateMatcher:
                         table_number += 1
 
                         # track that both these people are now in the current round
+                        attendees_seated_this_round.update([attendee_id, compatible_date.id])
                         rounds_completed_per_attendee[attendee_id] += 1
                         rounds_completed_per_attendee[compatible_date.id] += 1
-                        attendees_seated_this_round.update([attendee_id, compatible_date.id])
 
                         # remove each other from their compatible dates list
                         all_compatible_dates[attendee_id].remove(compatible_date)
