@@ -11,5 +11,15 @@ class EventSpeedDate(db.Model):
     female_interested = db.Column(db.Boolean, nullable=True)
     table_number = db.Column(db.Integer, nullable=False)
     round_number = db.Column(db.Integer, nullable=False)
-
-
+    
+    def __repr__(self):
+        return (
+            f"EventSpeedDate("
+            f"id={self.id}, "
+            f"event_id={self.event_id}, "
+            f"male_id='{self.male_id}', "
+            f"female_id='{self.female_id}', "
+            f"table_number={self.table_number}, "
+            f"round_number={self.round_number}"
+            f")\n"
+        )
