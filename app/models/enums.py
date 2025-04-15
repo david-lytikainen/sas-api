@@ -1,9 +1,8 @@
 from enum import Enum
 
 class EventStatus(Enum):
-    DRAFT = 'draft'
     PUBLISHED = 'published'
-    IN_PROGRESS = 'in_progress'
+    IN_PROGRESS = 'in progress'
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
 

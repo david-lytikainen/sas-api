@@ -1,26 +1,24 @@
 from flask import Blueprint, jsonify, request, make_response
 from app.models.event import Event
 from app.models.user import User
-from app.models.event_registration import EventRegistration
+from app.models.event_attendee import EventAttendee
 from app.models.enums import EventStatus, UserRole, RegistrationStatus
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask_cors import cross_origin
 from datetime import datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import and_, or_
+from app.services.event_service import EventService
 
 event_bp = Blueprint('event', __name__)
 
 @event_bp.route('/events', methods=['GET', 'OPTIONS'])
-@cross_origin(supports_credentials=True)
 @jwt_required()
 def get_events():
     if request.method == 'OPTIONS':
         response = make_response()
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response
 
     try:
@@ -29,59 +27,18 @@ def get_events():
         if not current_user:
             return jsonify({'error': 'User not found'}), 404
 
-        # Get query parameters for filtering
-        status = request.args.get('status')
-        
-        # Base query
-        query = Event.query
-
-        # Apply filters
-        if status:
-            query = query.filter(Event.status == status)
-        
-        # Get all events
-        events = query.all()
+        # Get events using EventService
+        events = EventService.get_events()
         
         # Format response
         events_data = []
         for event in events:
             event_data = event.to_dict()
-            # Add registration status for attendees
-            if current_user.role_id == UserRole.ATTENDEE.value:
-                registration = EventRegistration.query.filter_by(
-                    event_id=event.id,
-                    user_id=current_user_id
-                ).first()
-                event_data['is_registered'] = bool(registration)
             events_data.append(event_data)
 
         return jsonify(events_data)
     except Exception as e:
         print(f"Error fetching events: {str(e)}")
-        return jsonify({'error': 'Failed to fetch events'}), 500
-
-@event_bp.route('/events/my-events', methods=['GET'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def get_my_events():
-    try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 404
-
-        # For admin/organizer: get events they created
-        # For attendee: get events they're registered for
-        if current_user.role_id in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            events = Event.query.filter_by(creator_id=current_user_id).all()
-        else:
-            events = Event.query.join(EventRegistration).filter(
-                EventRegistration.user_id == current_user_id
-            ).all()
-
-        return jsonify([event.to_dict() for event in events])
-    except Exception as e:
-        print(f"Error fetching my events: {str(e)}")
         return jsonify({'error': 'Failed to fetch events'}), 500
 
 @event_bp.route('/events', methods=['POST'])
@@ -131,90 +88,6 @@ def create_event():
         print(f"Error creating event: {str(e)}")
         return jsonify({'error': 'Failed to create event'}), 500
 
-@event_bp.route('/events/<int:event_id>', methods=['GET'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def get_event(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        event = Event.query.get_or_404(event_id)
-        
-        event_data = event.to_dict()
-        
-        # Add registration status for attendees
-        current_user = User.query.get(current_user_id)
-        if current_user.role_id == UserRole.ATTENDEE.value:
-            registration = EventRegistration.query.filter_by(
-                event_id=event_id,
-                user_id=current_user_id
-            ).first()
-            event_data['is_registered'] = bool(registration)
-            
-        return jsonify(event_data)
-    except Exception as e:
-        print(f"Error fetching event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to fetch event'}), 500
-
-@event_bp.route('/events/<int:event_id>', methods=['PUT'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def update_event(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        event = Event.query.get_or_404(event_id)
-        
-        # Check permissions
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        if current_user.role_id == UserRole.ORGANIZER.value and event.creator_id != current_user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        data = request.get_json()
-        
-        # Update fields
-        for field in ['name', 'description', 'starts_at', 'ends_at', 'address', 
-                     'max_capacity', 'price_per_person', 'registration_deadline']:
-            if field in data:
-                if field in ['starts_at', 'ends_at', 'registration_deadline']:
-                    value = datetime.fromisoformat(data[field].replace('Z', '+00:00'))
-                elif field == 'price_per_person':
-                    value = Decimal(str(data[field]))
-                else:
-                    value = data[field]
-                setattr(event, field, value)
-
-        db.session.commit()
-        return jsonify(event.to_dict())
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error updating event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to update event'}), 500
-
-@event_bp.route('/events/<int:event_id>', methods=['DELETE'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def delete_event(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        event = Event.query.get_or_404(event_id)
-        
-        # Check permissions
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        if current_user.role_id == UserRole.ORGANIZER.value and event.creator_id != current_user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        db.session.delete(event)
-        db.session.commit()
-        return '', 204
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error deleting event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to delete event'}), 500
 
 @event_bp.route('/events/<int:event_id>/register', methods=['POST'])
 @cross_origin(supports_credentials=True)
@@ -230,7 +103,7 @@ def register_for_event(event_id):
             return jsonify({'error': 'Only attendees can register for events'}), 403
             
         # Check if already registered
-        existing_registration = EventRegistration.query.filter_by(
+        existing_registration = EventAttendee.query.filter_by(
             event_id=event_id,
             user_id=current_user_id
         ).first()
@@ -243,9 +116,10 @@ def register_for_event(event_id):
             return jsonify({'error': 'Event is not open for registration'}), 400
             
         # Create registration
-        registration = EventRegistration(
+        registration = EventAttendee(
             event_id=event_id,
-            user_id=current_user_id
+            user_id=current_user_id,
+            status=RegistrationStatus.REGISTERED
         )
         
         db.session.add(registration)
@@ -263,7 +137,7 @@ def register_for_event(event_id):
 def cancel_registration(event_id):
     try:
         current_user_id = get_jwt_identity()
-        registration = EventRegistration.query.filter_by(
+        registration = EventAttendee.query.filter_by(
             event_id=event_id,
             user_id=current_user_id
         ).first_or_404()
@@ -313,7 +187,7 @@ def start_event(event_id):
 def check_registration_status(event_id):
     try:
         current_user_id = get_jwt_identity()
-        registration = EventRegistration.query.filter_by(
+        registration = EventAttendee.query.filter_by(
             event_id=event_id,
             user_id=current_user_id
         ).first()

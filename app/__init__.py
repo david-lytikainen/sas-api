@@ -18,7 +18,8 @@ def create_app():
          r"/api/*": {
              "origins": "http://localhost:3000",
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"]
+             "allow_headers": ["Content-Type", "Authorization"],
+             "expose_headers": ["Authorization"]
          }
      })
 
@@ -42,17 +43,8 @@ def create_app():
     # Register blueprints
     from app.routes.user_routes import user_bp
     from app.routes.event_routes import event_bp
-    from app.routes.matches_routes import matches_bp
     app.register_blueprint(user_bp, url_prefix='/api/user')
     app.register_blueprint(event_bp, url_prefix='/api')
-    app.register_blueprint(matches_bp, url_prefix='/api')
-    
-    @app.after_request
-    def log_response_headers(response):
-        print("Response headers")
-        for header, value in response.headers.items():
-            print(f"{header}: {value}")
-        return response
 
     # Add health check endpoint
     @app.route('/api/health', methods=['GET'])
