@@ -23,7 +23,6 @@ def create_app():
          }
      })
 
-
     # Configure database
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/SAS')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False

@@ -4,7 +4,7 @@ from app.models.user import User
 from app.models.event_attendee import EventAttendee
 from app.models.enums import EventStatus, UserRole, RegistrationStatus
 from app.extensions import db
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_cors import cross_origin
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -13,33 +13,14 @@ from app.services.event_service import EventService
 event_bp = Blueprint('event', __name__)
 
 @event_bp.route('/events', methods=['GET', 'OPTIONS'])
-@jwt_required()
 def get_events():
     if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        return response
+        return '', 204
 
-    try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 404
+    verify_jwt_in_request() 
+    user_id = get_jwt_identity()
+    return jsonify(EventService.get_events_for_user(user_id))
 
-        # Get events using EventService
-        events = EventService.get_events()
-        
-        # Format response
-        events_data = []
-        for event in events:
-            event_data = event.to_dict()
-            events_data.append(event_data)
-
-        return jsonify(events_data)
-    except Exception as e:
-        print(f"Error fetching events: {str(e)}")
-        return jsonify({'error': 'Failed to fetch events'}), 500
 
 @event_bp.route('/events', methods=['POST'])
 @cross_origin(supports_credentials=True)
@@ -90,29 +71,13 @@ def create_event():
 
 
 @event_bp.route('/events/<int:event_id>/register', methods=['POST'])
-@cross_origin(supports_credentials=True)
 @jwt_required()
 def register_for_event(event_id):
     try:
         current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        event = Event.query.get_or_404(event_id)
-        
-        # Check if user is an attendee
-        if current_user.role_id != UserRole.ATTENDEE.value:
-            return jsonify({'error': 'Only attendees can register for events'}), 403
-            
-        # Check if already registered
-        existing_registration = EventAttendee.query.filter_by(
-            event_id=event_id,
-            user_id=current_user_id
-        ).first()
-        
-        if existing_registration:
-            return jsonify({'error': 'Already registered for this event'}), 400
             
         # Check event status
-        if event.status != EventStatus.PUBLISHED:
+        if event.status != EventStatus.OPEN:
             return jsonify({'error': 'Event is not open for registration'}), 400
             
         # Create registration
