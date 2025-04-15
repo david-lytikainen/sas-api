@@ -3,7 +3,7 @@ from app.models.enums import Gender
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from app.repositories import UserRepository
-from datetime import timedelta
+from datetime import timedelta, datetime
 import logging
 
 # Configure logging
@@ -29,7 +29,7 @@ class UserService:
                 gender = Gender[gender_str]
             except KeyError:
                 logger.warning(f"Invalid gender value: {gender_str}")
-                gender = Gender.NOT_SPECIFIED
+                raise ValueError('Invalid gender value. Must be either MALE or FEMALE')
             
             # Create user object
             user = User(
@@ -40,7 +40,7 @@ class UserService:
                 last_name=user_data['last_name'],
                 phone=user_data['phone'],
                 gender=gender,
-                age=user_data['age'],
+                birthday=datetime.strptime(user_data['birthday'], '%Y-%m-%d').date(),
                 church_id=user_data.get('church_id'),
                 denomination_id=user_data.get('denomination_id')
             )
@@ -85,7 +85,7 @@ class UserService:
             
             # Generate token
             access_token = create_access_token(
-                identity=user.id,
+                identity=str(user.id),
                 expires_delta=timedelta(days=1)
             )
             

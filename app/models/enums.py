@@ -1,9 +1,8 @@
 from enum import Enum
 
 class EventStatus(Enum):
-    DRAFT = 'draft'
     PUBLISHED = 'published'
-    IN_PROGRESS = 'in_progress'
+    IN_PROGRESS = 'in progress'
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
 
@@ -15,8 +14,6 @@ class UserRole(Enum):
 class Gender(Enum):
     MALE = 'MALE'
     FEMALE = 'FEMALE'
-    OTHER = 'OTHER'
-    NOT_SPECIFIED = 'NOT_SPECIFIED'
 
 class RegistrationStatus(Enum):
     REGISTERED = 'registered'
