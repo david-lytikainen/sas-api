@@ -15,8 +15,6 @@ class UserRole(Enum):
 class Gender(Enum):
     MALE = 'MALE'
     FEMALE = 'FEMALE'
-    OTHER = 'OTHER'
-    NOT_SPECIFIED = 'NOT_SPECIFIED'
 
 class RegistrationStatus(Enum):
     REGISTERED = 'registered'

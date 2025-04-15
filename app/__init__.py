@@ -12,17 +12,19 @@ def create_app():
     app = Flask(__name__)
     
     # Configure CORS
-    CORS(app, resources={
-        r"/api/*": {
-            "origins": ["http://localhost:3000", "http://172.16.225.58:3000"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
-        }
-    })
+    CORS(app,
+     supports_credentials=True,
+     resources={
+         r"/api/*": {
+             "origins": "http://localhost:3000",
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     })
+
 
     # Configure database
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/sas_db')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/SAS')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     # Configure JWT
@@ -45,6 +47,13 @@ def create_app():
     app.register_blueprint(event_bp, url_prefix='/api')
     app.register_blueprint(matches_bp, url_prefix='/api')
     
+    @app.after_request
+    def log_response_headers(response):
+        print("Response headers")
+        for header, value in response.headers.items():
+            print(f"{header}: {value}")
+        return response
+
     # Add health check endpoint
     @app.route('/api/health', methods=['GET'])
     def health_check():
