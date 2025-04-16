@@ -7,6 +7,7 @@ from app.models import User, Role
 from app.models.enums import Gender
 from app.extensions import db
 from werkzeug.security import generate_password_hash
+from datetime import date
 
 def main():
     """Create or update demo accounts with correct credentials."""
@@ -41,8 +42,8 @@ def main():
                 first_name='Admin',
                 last_name='User',
                 phone='123-456-7890',
-                gender=Gender.NOT_SPECIFIED,
-                age=30
+                gender=Gender.MALE,
+                birthday=date(1990, 1, 1)
             )
             db.session.add(admin)
             db.session.commit()
@@ -62,8 +63,8 @@ def main():
                 first_name='Attendee',
                 last_name='User',
                 phone='123-456-7890',
-                gender=Gender.NOT_SPECIFIED,
-                age=25
+                gender=Gender.FEMALE,
+                birthday=date(1995, 1, 1)
             )
             db.session.add(attendee)
             db.session.commit()

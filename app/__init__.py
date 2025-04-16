@@ -11,17 +11,31 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
     
-    # Configure CORS
+    # Configure CORS - More permissive during development
     CORS(app,
-     supports_credentials=True,
-     resources={
-         r"/api/*": {
-             "origins": "http://localhost:3000",
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"],
-             "expose_headers": ["Authorization"]
-         }
-     })
+         supports_credentials=True,
+         resources={
+             r"/api/*": {
+                 "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5001"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+                 "allow_headers": ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+                 "expose_headers": ["Authorization", "Content-Type"],
+                 "max_age": 3600,
+                 "supports_credentials": True
+             }
+         })
+
+    # Add CORS headers to all responses
+    @app.after_request
+    def after_request(response):
+        origin = request.headers.get('Origin')
+        if origin in ["http://localhost:3000", "http://127.0.0.1:3000"]:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS,PATCH')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            response.headers.add('Access-Control-Expose-Headers', 'Authorization,Content-Type')
+        return response
 
     # Configure database
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/SAS')
