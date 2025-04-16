@@ -2,11 +2,11 @@ from flask import Blueprint, jsonify, request, make_response
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
-from app.models.enums import EventStatus, UserRole, RegistrationStatus
+from app.models.enums import EventStatus, RegistrationStatus
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_cors import cross_origin
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from app.services.event_service import EventService
 
@@ -77,7 +77,7 @@ def register_for_event(event_id):
         current_user_id = get_jwt_identity()
             
         # Check event status
-        if event.status != EventStatus.OPEN:
+        if event.status != EventStatus.REGISTRATION_OPEN:
             return jsonify({'error': 'Event is not open for registration'}), 400
             
         # Create registration
@@ -145,19 +145,3 @@ def start_event(event_id):
         db.session.rollback()
         print(f"Error starting event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to start event'}), 500
-
-@event_bp.route('/events/<int:event_id>/registration-status', methods=['GET'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def check_registration_status(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        registration = EventAttendee.query.filter_by(
-            event_id=event_id,
-            user_id=current_user_id
-        ).first()
-        
-        return jsonify({'is_registered': bool(registration)})
-    except Exception as e:
-        print(f"Error checking registration status for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to check registration status'}), 500 

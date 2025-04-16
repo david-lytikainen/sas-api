@@ -1,7 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response
 from app.services import UserService
-from werkzeug.exceptions import BadRequest
-from flask_cors import cross_origin
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import User
 
@@ -26,8 +24,7 @@ def sign_up():
             }), 400
         
         result = UserService.sign_up(user_data)
-        response = make_response(jsonify(result), 201)
-        return response
+        return make_response(jsonify(result), 201)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:

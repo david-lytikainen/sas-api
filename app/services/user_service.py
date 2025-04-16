@@ -76,12 +76,12 @@ class UserService:
             user = UserRepository.find_by_email(email)
             if not user:
                 logger.warning(f"Login attempt with non-existent email: {email}")
-                raise ValueError('Invalid email or password')
+                raise ValueError('Invalid email')
             
             # Verify password
             if not check_password_hash(user.password, password):
                 logger.warning(f"Failed login attempt for user: {email}")
-                raise ValueError('Invalid email or password')
+                raise ValueError('Invalid password')
             
             # Generate token
             access_token = create_access_token(

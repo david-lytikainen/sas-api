@@ -32,8 +32,6 @@ class Event(db.Model):
             'max_capacity': self.max_capacity,
             'status': self.status.value if self.status else None,
             'price_per_person': str(self.price_per_person) if self.price_per_person else None,
-            'registration_deadline': self.registration_deadline.isoformat() if self.registration_deadline else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'registration_deadline': self.registration_deadline.isoformat() if self.registration_deadline else None
         }
     
