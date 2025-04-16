@@ -145,19 +145,3 @@ def start_event(event_id):
         db.session.rollback()
         print(f"Error starting event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to start event'}), 500
-
-@event_bp.route('/events/<int:event_id>/registration-status', methods=['GET'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def check_registration_status(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        registration = EventAttendee.query.filter_by(
-            event_id=event_id,
-            user_id=current_user_id
-        ).first()
-        
-        return jsonify({'is_registered': bool(registration)})
-    except Exception as e:
-        print(f"Error checking registration status for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to check registration status'}), 500 
