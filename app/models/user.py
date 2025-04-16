@@ -38,11 +38,10 @@ class User(db.Model):
             'last_name': self.last_name,
             'phone': self.phone,
             'gender': self.gender.value if self.gender else None,
+            'birthday': self.birthday if self.birthday else None,
             'age': self.calculate_age(),
             'church_id': self.church_id,
-            'denomination_id': self.denomination_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'denomination_id': self.denomination_id
         }
 
     def __repr__(self):

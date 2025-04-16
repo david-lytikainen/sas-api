@@ -79,7 +79,7 @@ def create_test_event(creator_id):
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
-        status=EventStatus.PUBLISHED,
+        status=EventStatus.REGISTRATION_OPEN,
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30"
