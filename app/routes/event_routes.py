@@ -6,8 +6,7 @@ from app.models.enums import EventStatus, RegistrationStatus
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_cors import cross_origin
-from datetime import datetime
-from decimal import Decimal
+from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 
 event_bp = Blueprint('event', __name__)
@@ -22,48 +21,19 @@ def get_events():
     return jsonify(EventService.get_events_for_user(user_id))
 
 
-@event_bp.route('/events', methods=['POST'])
-@cross_origin(supports_credentials=True)
+@event_bp.route('/events/create', methods=['POST'])
 @jwt_required()
 def create_event():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
     try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        
-        # Only admin and organizer can create events
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['name', 'description', 'starts_at', 'ends_at', 
-                         'address', 'max_capacity', 'price_per_person']
-        missing_fields = [field for field in required_fields if field not in data]
-        if missing_fields:
-            return jsonify({
-                'error': 'Missing required fields',
-                'missing_fields': missing_fields
-            }), 400
-
-        # Create new event
-        event = Event(
-            name=data['name'],
-            description=data['description'],
-            creator_id=current_user_id,
-            starts_at=datetime.fromisoformat(data['starts_at'].replace('Z', '+00:00')),
-            ends_at=datetime.fromisoformat(data['ends_at'].replace('Z', '+00:00')),
-            address=data['address'],
-            max_capacity=data['max_capacity'],
-            status=EventStatus.PUBLISHED,
-            price_per_person=Decimal(str(data['price_per_person'])),
-            registration_deadline=datetime.fromisoformat(data['registration_deadline'].replace('Z', '+00:00')) if 'registration_deadline' in data else None
-        )
-
-        db.session.add(event)
-        db.session.commit()
-
+        event = EventService.create_event(data, current_user_id)
         return jsonify(event.to_dict()), 201
+    except MissingFieldsError as e:
+        return jsonify({'error': 'Missing required fields', 'missing_fields': e.fields}), 400
+    except UnauthorizedError:
+        return jsonify({'error': 'Unauthorized'}), 403
     except Exception as e:
         db.session.rollback()
         print(f"Error creating event: {str(e)}")
