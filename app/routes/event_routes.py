@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, make_response
+from flask import Blueprint, jsonify, request
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
@@ -8,6 +8,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_req
 from flask_cors import cross_origin
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
+import random
 
 event_bp = Blueprint('event', __name__)
 
@@ -18,7 +19,19 @@ def get_events():
 
     verify_jwt_in_request() 
     user_id = get_jwt_identity()
-    return jsonify(EventService.get_events_for_user(user_id))
+    
+    # Get all events
+    events_data = EventService.get_events_for_user(user_id)
+    
+    # Get user's registrations
+    user_registrations = EventAttendee.query.filter_by(user_id=user_id).all()
+    registrations_data = [{"event_id": reg.event_id, "status": reg.status.value} for reg in user_registrations]
+    
+    # Return both events and registrations
+    return jsonify({
+        "events": events_data,
+        "registrations": registrations_data
+    })
 
 
 @event_bp.route('/events/create', methods=['POST'])
@@ -43,48 +56,20 @@ def create_event():
 @event_bp.route('/events/<int:event_id>/register', methods=['POST'])
 @jwt_required()
 def register_for_event(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-            
-        # Check event status
-        if event.status != EventStatus.REGISTRATION_OPEN:
-            return jsonify({'error': 'Event is not open for registration'}), 400
-            
-        # Create registration
-        registration = EventAttendee(
-            event_id=event_id,
-            user_id=current_user_id,
-            status=RegistrationStatus.REGISTERED
-        )
-        
-        db.session.add(registration)
-        db.session.commit()
-        
-        return jsonify({'message': 'Successfully registered for event'})
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error registering for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to register for event'}), 500
+    current_user_id = get_jwt_identity()
+    response = EventService.register_for_event(event_id, current_user_id)
+    return jsonify(response)
 
-@event_bp.route('/events/<int:event_id>/register', methods=['DELETE'])
-@cross_origin(supports_credentials=True)
-@jwt_required()
+@event_bp.route('/events/<int:event_id>/cancel-registration', methods=['POST', 'OPTIONS'])
 def cancel_registration(event_id):
-    try:
-        current_user_id = get_jwt_identity()
-        registration = EventAttendee.query.filter_by(
-            event_id=event_id,
-            user_id=current_user_id
-        ).first_or_404()
-        
-        db.session.delete(registration)
-        db.session.commit()
-        
+    if request.method == 'OPTIONS':
         return '', 204
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error cancelling registration for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to cancel registration'}), 500
+        
+    verify_jwt_in_request() 
+    user_id = get_jwt_identity()
+    EventService.cancel_registration(event_id, user_id)
+    return jsonify({'message': 'Registration cancelled successfully'}), 200
+
 
 @event_bp.route('/events/<int:event_id>/start', methods=['POST'])
 @cross_origin(supports_credentials=True)
