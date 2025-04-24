@@ -1,9 +1,11 @@
 from datetime import datetime
 from decimal import Decimal
+import random
 from app.repositories.event_repository import EventRepository
 from app.repositories.user_repository import UserRepository
+from app.repositories.event_attendee_repository import EventAttendeeRepository
 from app.exceptions import UnauthorizedError, MissingFieldsError
-from app.models.enums import EventStatus
+from app.models.enums import EventStatus, RegistrationStatus
 from app.models import Event
 from typing import List
 
@@ -40,22 +42,43 @@ class EventService:
         if missing:
             raise MissingFieldsError(missing)
 
-        event = EventRepository.create_event(
-            {
-                "name": data["name"],
-                "description": data.get("description"),
-                "creator_id": user_id,
-                "starts_at": datetime.fromisoformat(
-                    data["starts_at"].replace("Z", "+00:00")
-                ),
-                "address": data["address"],
-                "max_capacity": data["max_capacity"],
-                "status": EventStatus.REGISTRATION_OPEN,
-                "price_per_person": Decimal(str(data["price_per_person"])),
-                "registration_deadline": datetime.fromisoformat(
-                    data["starts_at"].replace("Z", "+00:00")
-                ),
-            }
-        )
+        event = EventRepository.create_event({
+            'name': data['name'],
+            'description': data['description'],
+            'creator_id': user_id,
+            'starts_at': datetime.fromisoformat(data['starts_at'].replace('Z', '+00:00')),
+            'address': data['address'],
+            'max_capacity': data['max_capacity'],
+            'status': EventStatus.REGISTRATION_OPEN,
+            'price_per_person': Decimal(str(data['price_per_person'])),
+            'registration_deadline': datetime.fromisoformat(data['starts_at'].replace('Z', '+00:00'))
+        })
 
         return event
+    
+    @staticmethod
+    def register_for_event(event_id: int, user_id: int):
+        event = EventRepository.get_event(event_id)
+        if event.status != EventStatus.REGISTRATION_OPEN:
+            return {'error': 'Event is not open for registration'}
+        
+        # Check if user is already registered for this event
+        existing_registration = EventAttendeeRepository.find_by_event_and_user(event_id, user_id)
+        if existing_registration:
+            return {'error': 'You are already registered for this event'}
+        
+        # Generate random 4-digit PIN
+        pin = ''.join(random.choices('0123456789', k=4))
+        
+        EventAttendeeRepository.register_for_event({
+            'event_id': event_id,
+            'user_id': user_id,
+            'status': RegistrationStatus.REGISTERED,
+            'pin': pin
+        })
+        
+        return {'message': 'Successfully registered for event'}
+    
+    @staticmethod
+    def cancel_registration(event_id: int, user_id: int):
+        EventAttendeeRepository.delete(event_id, user_id)

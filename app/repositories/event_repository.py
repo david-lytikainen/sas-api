@@ -9,8 +9,8 @@ class EventRepository:
 
     @staticmethod
     def get_event(event_id: int):
-        return Event.query.filter_by(id=event_id)
-
+        return Event.query.filter_by(id=event_id).first()
+   
     @staticmethod
     def create_event(attrs):
         event = Event(**attrs)
