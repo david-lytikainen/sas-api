@@ -1,7 +1,4 @@
 #!/bin/bash
 cd "$(dirname "$0")/.."
 source venv/bin/activate
-export FLASK_APP=run.py
-export FLASK_ENV=development
-export FLASK_DEBUG=1
-python start.py
+python3 start.py 2>&1 | tee logs/api.log
