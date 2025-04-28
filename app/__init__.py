@@ -2,14 +2,19 @@ from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-from app.extensions import db, migrate, jwt
+from app.extensions import db, migrate, jwt, socketio
 from datetime import timedelta
+import logging
 
 # Load environment variables
 load_dotenv()
 
 def create_app():
     app = Flask(__name__)
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    app.logger.setLevel(logging.INFO)
 
     # Configure database
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/SAS')
@@ -30,8 +35,10 @@ def create_app():
     # Register blueprints
     from app.routes.user_routes import user_bp
     from app.routes.event_routes import event_bp
+    from app.routes.admin_routes import admin_bp
     app.register_blueprint(user_bp, url_prefix='/api/user')
     app.register_blueprint(event_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp, url_prefix='/api')
 
     # Configure CORS - More permissive during development
     CORS(app,
@@ -46,6 +53,26 @@ def create_app():
                  "supports_credentials": True
              }
          })
+    
+    # Set cors allowed origins as app config
+    app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5001", "*"]
+    
+    # Initialize SocketIO with more explicit configuration
+    socketio.init_app(
+        app, 
+        cors_allowed_origins=app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'],
+        logger=True,
+        engineio_logger=True,
+        ping_timeout=60,
+        ping_interval=25,
+        async_mode='threading'
+    )
+    
+    app.logger.info("SocketIO initialized with CORS origins: %s", app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'])
+
+    # Import socket event handlers
+    from app.sockets import event_sockets
+    app.logger.info("Socket event handlers registered")
 
     return app
     
