@@ -5,6 +5,7 @@ class EventStatus(Enum):
     IN_PROGRESS = 'In Progress'
     COMPLETED = 'Completed'
     CANCELLED = 'Cancelled'
+    PAUSED = 'Paused'
 
 class Gender(Enum):
     MALE = 'Male'
@@ -14,4 +15,9 @@ class RegistrationStatus(Enum):
     REGISTERED = 'Registered'
     CHECKED_IN = 'Checked In'
     CANCELLED = 'Cancelled'
+    
+class UserRole(Enum):
+    USER = 1
+    ORGANIZER = 2
+    ADMIN = 3
     
