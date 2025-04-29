@@ -14,14 +14,15 @@ import random
 from sqlalchemy import text
 from datetime import datetime
 
-event_bp = Blueprint('event', __name__)
+event_bp = Blueprint("event", __name__)
 
-@event_bp.route('/events', methods=['GET', 'OPTIONS'])
+
+@event_bp.route("/events", methods=["GET", "OPTIONS"])
 def get_events():
-    if request.method == 'OPTIONS':
-        return '', 204
+    if request.method == "OPTIONS":
+        return "", 204
 
-    verify_jwt_in_request() 
+    verify_jwt_in_request()
     user_id = get_jwt_identity()
     
     # Get all events
@@ -89,16 +90,19 @@ def create_event():
         event = EventService.create_event(data, current_user_id)
         return jsonify(event.to_dict()), 201
     except MissingFieldsError as e:
-        return jsonify({'error': 'Missing required fields', 'missing_fields': e.fields}), 400
+        return (
+            jsonify({"error": "Missing required fields", "missing_fields": e.fields}),
+            400,
+        )
     except UnauthorizedError:
-        return jsonify({'error': 'Unauthorized'}), 403
+        return jsonify({"error": "Unauthorized"}), 403
     except Exception as e:
         db.session.rollback()
         print(f"Error creating event: {str(e)}")
-        return jsonify({'error': 'Failed to create event'}), 500
+        return jsonify({"error": "Failed to create event"}), 500
 
 
-@event_bp.route('/events/<int:event_id>/register', methods=['POST'])
+@event_bp.route("/events/<int:event_id>/register", methods=["POST"])
 @jwt_required()
 def register_for_event(event_id):
     current_user_id = get_jwt_identity()
@@ -116,7 +120,7 @@ def cancel_registration(event_id):
     return jsonify(response), status_code
 
 
-@event_bp.route('/events/<int:event_id>/start', methods=['POST'])
+@event_bp.route("/events/<int:event_id>/start", methods=["POST"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
 def start_event(event_id):
@@ -124,14 +128,17 @@ def start_event(event_id):
         current_user_id = get_jwt_identity()
         current_user = User.query.get(current_user_id)
         event = Event.query.get_or_404(event_id)
-        
+
         # Check permissions
         if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({'error': 'Unauthorized'}), 403
-            
-        if current_user.role_id == UserRole.ORGANIZER.value and event.creator_id != current_user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-            
+            return jsonify({"error": "Unauthorized"}), 403
+
+        if (
+            current_user.role_id == UserRole.ORGANIZER.value
+            and event.creator_id != current_user_id
+        ):
+            return jsonify({"error": "Unauthorized"}), 403
+
         # Check event status
         if event.status != EventStatus.REGISTRATION_OPEN:
             return jsonify({'error': 'Event cannot be started'}), 400

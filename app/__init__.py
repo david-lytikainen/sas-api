@@ -9,6 +9,7 @@ import logging
 # Load environment variables
 load_dotenv()
 
+
 def create_app():
     app = Flask(__name__)
 
@@ -17,21 +18,23 @@ def create_app():
     app.logger.setLevel(logging.INFO)
 
     # Configure database
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/SAS')
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "DATABASE_URL", "postgresql://localhost/SAS"
+    )
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
     # Configure JWT
-    app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key')
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)
-    app.config['JWT_TOKEN_LOCATION'] = ['headers']
-    app.config['JWT_HEADER_NAME'] = 'Authorization'
-    app.config['JWT_HEADER_TYPE'] = 'Bearer'
-    
+    app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your-secret-key")
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
+    app.config["JWT_TOKEN_LOCATION"] = ["headers"]
+    app.config["JWT_HEADER_NAME"] = "Authorization"
+    app.config["JWT_HEADER_TYPE"] = "Bearer"
+
     # Initialize Flask extensions
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    
+
     # Register blueprints
     from app.routes.user_routes import user_bp
     from app.routes.event_routes import event_bp
@@ -83,5 +86,5 @@ def create_app():
         app.logger.info(f"Serving sound file {filename} from {static_dir}")
         return send_from_directory(static_dir, filename)
 
+
     return app
-    

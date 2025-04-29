@@ -3,6 +3,7 @@ from app.extensions import db
 from app.models import EventAttendee, User
 from app.models.enums import RegistrationStatus
 
+
 class EventAttendeeRepository:
     @staticmethod
     def find_by_event_id_and_checked_in(event_id: int) -> List[User]:
@@ -39,3 +40,4 @@ class EventAttendeeRepository:
         db.session.delete(registration)
         db.session.commit()
         return registration
+
