@@ -12,17 +12,15 @@ from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
 import random
 from sqlalchemy import text
-from datetime import datetime
 
-event_bp = Blueprint("event", __name__)
+event_bp = Blueprint('event', __name__)
 
-
-@event_bp.route("/events", methods=["GET", "OPTIONS"])
+@event_bp.route('/events', methods=['GET', 'OPTIONS'])
 def get_events():
-    if request.method == "OPTIONS":
-        return "", 204
+    if request.method == 'OPTIONS':
+        return '', 204
 
-    verify_jwt_in_request()
+    verify_jwt_in_request() 
     user_id = get_jwt_identity()
     
     # Get all events
@@ -90,19 +88,16 @@ def create_event():
         event = EventService.create_event(data, current_user_id)
         return jsonify(event.to_dict()), 201
     except MissingFieldsError as e:
-        return (
-            jsonify({"error": "Missing required fields", "missing_fields": e.fields}),
-            400,
-        )
+        return jsonify({'error': 'Missing required fields', 'missing_fields': e.fields}), 400
     except UnauthorizedError:
-        return jsonify({"error": "Unauthorized"}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     except Exception as e:
         db.session.rollback()
         print(f"Error creating event: {str(e)}")
-        return jsonify({"error": "Failed to create event"}), 500
+        return jsonify({'error': 'Failed to create event'}), 500
 
 
-@event_bp.route("/events/<int:event_id>/register", methods=["POST"])
+@event_bp.route('/events/<int:event_id>/register', methods=['POST'])
 @jwt_required()
 def register_for_event(event_id):
     current_user_id = get_jwt_identity()
@@ -120,7 +115,7 @@ def cancel_registration(event_id):
     return jsonify(response), status_code
 
 
-@event_bp.route("/events/<int:event_id>/start", methods=["POST"])
+@event_bp.route('/events/<int:event_id>/start', methods=['POST'])
 @cross_origin(supports_credentials=True)
 @jwt_required()
 def start_event(event_id):
@@ -128,17 +123,14 @@ def start_event(event_id):
         current_user_id = get_jwt_identity()
         current_user = User.query.get(current_user_id)
         event = Event.query.get_or_404(event_id)
-
+        
         # Check permissions
         if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({"error": "Unauthorized"}), 403
-
-        if (
-            current_user.role_id == UserRole.ORGANIZER.value
-            and event.creator_id != current_user_id
-        ):
-            return jsonify({"error": "Unauthorized"}), 403
-
+            return jsonify({'error': 'Unauthorized'}), 403
+            
+        if current_user.role_id == UserRole.ORGANIZER.value and event.creator_id != current_user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+            
         # Check event status
         if event.status != EventStatus.REGISTRATION_OPEN:
             return jsonify({'error': 'Event cannot be started'}), 400
@@ -201,14 +193,14 @@ def update_event_status(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Get the user with role preloaded to avoid lazy loading issues
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
         # Check if user has permission to update the event
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to update this event'}), 403
@@ -249,14 +241,14 @@ def get_event_attendee_pins(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Get the user with role preloaded to avoid lazy loading issues
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
         # Check if user has permission to view pins
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to view attendee pins'}), 403
@@ -300,14 +292,14 @@ def get_event_attendees(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Get the user with role preloaded to avoid lazy loading issues
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
         # Check if user has permission to view attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to view attendee information'}), 403
@@ -345,99 +337,6 @@ def get_event_attendees(event_id):
     except Exception as e:
         print(f"Error in get_event_attendees: {str(e)}")
         return jsonify({'error': f'Error retrieving attendees: {str(e)}'}), 500
-
-@event_bp.route('/events/<int:event_id>/attendees/<int:attendee_id>', methods=['PATCH', 'OPTIONS'])
-@cross_origin(supports_credentials=True)
-def update_attendee_details(event_id, attendee_id):
-    if request.method == 'OPTIONS':
-        return '', 204
-        
-    verify_jwt_in_request()
-    current_user_id = get_jwt_identity()
-    
-    try:
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-        
-        # Get the user and verify permissions
-        current_user = User.query.get(current_user_id)
-        
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
-            
-        # Check if user has permission to update attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
-        
-        if not is_admin and not is_event_creator:
-            return jsonify({'error': 'Unauthorized to update attendee information'}), 403
-        
-        # Get request data
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No update data provided'}), 400
-        
-        # Get the user to update
-        user_to_update = User.query.get_or_404(attendee_id)
-        
-        # Also verify this user is actually registered for this event
-        attendee = EventAttendee.query.filter_by(event_id=event_id, user_id=attendee_id).first()
-        if not attendee:
-            return jsonify({'error': 'User is not registered for this event'}), 404
-        
-        # Track which fields were updated
-        updated_fields = []
-        
-        # Update user fields if provided
-        if 'first_name' in data and data['first_name']:
-            user_to_update.first_name = data['first_name']
-            updated_fields.append('first_name')
-            
-        if 'last_name' in data and data['last_name']:
-            user_to_update.last_name = data['last_name']
-            updated_fields.append('last_name')
-            
-        if 'email' in data and data['email']:
-            user_to_update.email = data['email']
-            updated_fields.append('email')
-            
-        if 'phone' in data and data['phone']:
-            user_to_update.phone = data['phone']
-            updated_fields.append('phone')
-            
-        if 'gender' in data and data['gender']:
-            try:
-                user_to_update.gender = Gender[data['gender'].upper()]
-                updated_fields.append('gender')
-            except KeyError:
-                return jsonify({'error': 'Invalid gender value. Must be either MALE or FEMALE'}), 400
-                
-        if 'birthday' in data and data['birthday']:
-            try:
-                user_to_update.birthday = datetime.strptime(data['birthday'], '%Y-%m-%d').date()
-                updated_fields.append('birthday')
-            except ValueError:
-                return jsonify({'error': 'Invalid birthday format. Use YYYY-MM-DD'}), 400
-        
-        # Update attendee fields
-        if 'pin' in data and data['pin']:
-            attendee.pin = data['pin']
-            updated_fields.append('pin')
-        
-        # Save changes if any fields were updated
-        if updated_fields:
-            db.session.commit()
-            return jsonify({
-                'message': 'Attendee details updated successfully',
-                'updated_fields': updated_fields
-            }), 200
-        else:
-            return jsonify({'message': 'No fields were updated'}), 200
-            
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error updating attendee details: {str(e)}")
-        return jsonify({'error': f'Error updating attendee: {str(e)}'}), 500
 
 @event_bp.route('/events/<int:event_id>/schedule', methods=['GET'])
 @jwt_required()
@@ -513,13 +412,13 @@ def get_timer_status(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Check if user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         try:
             # Try to get timer status
@@ -573,13 +472,13 @@ def initialize_timer(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
@@ -611,13 +510,13 @@ def start_round(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
@@ -649,13 +548,13 @@ def pause_round(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
@@ -690,13 +589,13 @@ def resume_round(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
@@ -724,13 +623,13 @@ def next_round(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
@@ -762,13 +661,13 @@ def update_round_duration(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
+        current_user = User.query.options(db.joinedload(User.role)).filter_by(id=current_user_id).first()
         
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
+        if not current_user or not current_user.role:
+            return jsonify({'error': 'User has no role assigned'}), 403
             
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_admin = current_user.role.permission_level >= UserRole.ADMIN.value
+        is_event_creator = current_user.role.permission_level >= UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
         
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403

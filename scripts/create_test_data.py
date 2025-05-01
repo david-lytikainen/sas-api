@@ -12,6 +12,7 @@ from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models.event import Event
 from app.models.event_attendee import EventAttendee
 from app.models.event_speed_date import EventSpeedDate
+from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
 from random import randint, randrange
 
@@ -81,6 +82,7 @@ def create_test_event(creator_id):
         creator_id=creator_id,
         starts_at=starts_at,
         address="123 Test Street, Test City, TS 12345",
+        address="123 Test Street, Test City, TS 123456",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
         status=EventStatus.REGISTRATION_OPEN,
@@ -119,12 +121,20 @@ def create_test_attendees(test_users, test_event):
 
 def delete_test_data():
     """Delete all test data from the database"""
-    db.session.query(EventSpeedDate).delete()
-    db.session.query(EventAttendee).delete()
-    db.session.query(Event).delete()
-    db.session.query(User).delete()
-    db.session.commit()
-
+    print("Deleting test data...")
+    try:
+        # Delete in proper order to respect foreign keys
+        db.session.query(EventSpeedDate).delete()
+        db.session.query(EventTimer).delete()
+        db.session.query(EventAttendee).delete()
+        db.session.query(Event).delete()
+        db.session.query(User).delete()
+        db.session.commit()
+        print("All test data deleted successfully")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting test data: {e}")
+        raise
 
 def main():
     with app.app_context():
