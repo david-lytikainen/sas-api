@@ -9,23 +9,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 @socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
-    logger.info("Socket connection attempt with headers: %s", request.headers)
-    auth_header = request.headers.get('Authorization')
+def handle_connect(auth):
+    """Handle client connection with token authentication from auth payload."""
+    logger.info("Socket connection attempt with auth: %s", auth)
     
-    if not auth_header or not auth_header.startswith('Bearer '):
-        logger.error("Socket connection rejected: No valid Authorization header")
-        return False  # Reject the connection
+    if not auth or 'token' not in auth:
+        logger.error("Socket connection rejected: No token provided in auth payload.")
+        return False # Reject the connection
     
-    token = auth_header.split(' ')[1]
+    token = auth['token']
     try:
         # Verify the token is valid
         decode_token(token)
-        logger.info("Socket connection accepted: Valid JWT token")
+        logger.info("Socket connection accepted: Valid JWT token from auth.")
         return True  # Accept the connection
     except Exception as e:
-        logger.error(f"Socket connection rejected due to invalid token: {str(e)}")
+        logger.error(f"Socket connection rejected due to invalid token in auth: {str(e)}")
         return False  # Reject the connection
 
 @socketio.on('join')

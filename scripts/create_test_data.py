@@ -15,7 +15,7 @@ from app.models.event_speed_date import EventSpeedDate
 from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
 from random import randint, randrange
-
+from werkzeug.security import generate_password_hash
 app = create_app()
 
 
@@ -28,7 +28,7 @@ def create_test_users():
         male_user = User(
             role_id=1,  # Assuming 1 is regular user role
             email=f"male{i+1}@test.com",
-            password="test123",  # You might want to hash this
+            password=generate_password_hash("test123"),  # You might want to hash this
             first_name=f"Male{i+1}",
             last_name=f"Test{i+1}",
             phone=f"+1555000{str(i+1).zfill(4)}",
@@ -44,7 +44,7 @@ def create_test_users():
         female_user = User(
             role_id=1,  # Assuming 1 is regular user role
             email=f"female{i+1}@test.com",
-            password="test123",  # You might want to hash this
+            password=generate_password_hash("test123"),  # You might want to hash this
             first_name=f"Female{i+1}",
             last_name=f"Test{i+1}",
             phone=f"+1555111{str(i+1).zfill(4)}",
@@ -82,7 +82,6 @@ def create_test_event(creator_id):
         creator_id=creator_id,
         starts_at=starts_at,
         address="123 Test Street, Test City, TS 12345",
-        address="123 Test Street, Test City, TS 123456",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
         status=EventStatus.REGISTRATION_OPEN,

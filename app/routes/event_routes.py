@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
-from app.models.enums import EventStatus, RegistrationStatus, UserRole
+from app.models.enums import EventStatus, RegistrationStatus, UserRole, Gender
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_cors import cross_origin
@@ -10,10 +10,7 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
-import random
-from sqlalchemy import text
 from datetime import datetime
-
 event_bp = Blueprint("event", __name__)
 
 
