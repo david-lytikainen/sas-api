@@ -21,8 +21,8 @@ def initialize_basic_data():
                 text("""
                 INSERT INTO roles (id, name, permission_level) 
                 VALUES 
-                (1, 'User', 1),
-                (2, 'Organizer', 2),
+                (1, 'Attendee', 1),
+                (2, 'Event Organizer', 2),
                 (3, 'Admin', 3)
                 ON CONFLICT (id) DO NOTHING;
                 """)

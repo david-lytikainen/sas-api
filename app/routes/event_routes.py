@@ -138,9 +138,22 @@ def start_event(event_id):
         ):
             return jsonify({"error": "Unauthorized"}), 403
 
+        # --- Add Attendee Count Check --- 
+        attendee_count = EventAttendee.query.filter(
+            EventAttendee.event_id == event_id,
+            # Ensure we check for string values if the enum isn't automatically handled
+            # Or use the enum directly if the column type supports it
+            EventAttendee.status.in_([RegistrationStatus.REGISTERED.value, RegistrationStatus.CHECKED_IN.value])
+        ).count()
+        
+        if attendee_count < 2:
+            current_app.logger.warning(f"Attempted to start event {event_id} with only {attendee_count} registered/checked-in attendees.")
+            return jsonify({'error': f'Cannot start event. Requires at least 2 registered or checked-in attendees. Found: {attendee_count}'}), 400
+        # --- End Attendee Count Check ---
+        
         # Check event status - using .value since status is now a string
         if event.status != EventStatus.REGISTRATION_OPEN.value:
-            return jsonify({'error': 'Event cannot be started'}), 400
+            return jsonify({'error': 'Event cannot be started (must be Registration Open)'}), 400
             
         # Update event status - using .value since status is now a string
         event.status = EventStatus.IN_PROGRESS.value
@@ -212,9 +225,44 @@ def update_event_status(event_id):
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to update this event'}), 403
         
+        # Store the current status before changing it
+        original_status = event.status
+        
+        # Check if status is actually changing
+        if original_status == status:
+             return jsonify({'message': 'Event status is already '+ status}), 200 # Or maybe 304 Not Modified
+             
         # Now we can directly assign the status string
         event.status = status
         db.session.commit()
+        current_app.logger.info(f"Successfully updated event {event_id} status from '{original_status}' to '{status}'")
+        
+        # --- Add Timer Coordination --- 
+        try:
+            # If changing TO Paused FROM In Progress, pause the timer
+            if status == EventStatus.PAUSED.value and original_status == EventStatus.IN_PROGRESS.value:
+                current_app.logger.info(f"Event {event_id} status changed to PAUSED, attempting to pause timer...")
+                pause_result = EventTimerService.pause_round(event_id) # No time_remaining needed here
+                if 'error' in pause_result:
+                     current_app.logger.warning(f"Failed to automatically pause timer for event {event_id} after status change: {pause_result['error']}")
+                     # Don't fail the whole request, just log the warning
+                else:
+                    current_app.logger.info(f"Successfully paused timer for event {event_id} due to status change.")
+            
+            # If changing FROM Paused TO In Progress, resume the timer
+            elif status == EventStatus.IN_PROGRESS.value and original_status == EventStatus.PAUSED.value:
+                current_app.logger.info(f"Event {event_id} status changed from PAUSED to IN_PROGRESS, attempting to resume timer...")
+                resume_result = EventTimerService.resume_round(event_id)
+                if 'error' in resume_result:
+                     current_app.logger.warning(f"Failed to automatically resume timer for event {event_id} after status change: {resume_result['error']}")
+                     # Don't fail the whole request, just log the warning
+                else:
+                   current_app.logger.info(f"Successfully resumed timer for event {event_id} due to status change.")
+        except Exception as timer_coord_error:
+             current_app.logger.error(f"Error during timer coordination for event {event_id} after status change: {str(timer_coord_error)}", exc_info=True)
+             # Log error but don't fail the main status update
+             
+        # --- End Timer Coordination ---
         
         return jsonify({'message': 'Event status updated successfully'}), 200
     except Exception as e:
@@ -556,48 +604,6 @@ def get_timer_status(event_id):
         return jsonify({'error': 'Failed to retrieve timer status'}), 500
 
 
-@event_bp.route('/events/<int:event_id>/timer/initialize', methods=['POST'])
-@jwt_required()
-def initialize_timer(event_id):
-    current_user_id = get_jwt_identity()
-    
-    try:
-        # Check if event exists
-        event = Event.query.get_or_404(event_id)
-        
-        # Verify user is admin or event creator
-        current_user = User.query.get(current_user_id)
-        
-        if not current_user:
-            return jsonify({'error': 'User not found'}), 403
-            
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
-        
-        if not is_admin and not is_event_creator:
-            return jsonify({'error': 'Unauthorized to manage event timer'}), 403
-        
-        # Get round duration from request, default to 3 minutes (180 seconds)
-        data = request.get_json() or {}
-        round_duration = data.get('round_duration', 180)
-        
-        # Initialize timer
-        timer_dict = EventTimerService.initialize_timer(event_id, round_duration)
-        
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
-        
-        return jsonify({
-            'message': 'Timer initialized',
-            'timer': timer_dict
-        }), 200
-        
-    except Exception as e:
-        print(f"Error initializing timer for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to initialize timer'}), 500
-
-
 @event_bp.route('/events/<int:event_id>/timer/start', methods=['POST'])
 @jwt_required()
 def start_round(event_id):
@@ -628,10 +634,6 @@ def start_round(event_id):
         
         if 'error' in result:
             return jsonify(result), 400
-            
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
             
         return jsonify(result), 200
         
@@ -666,26 +668,31 @@ def pause_round(event_id):
         if 'time_remaining' not in data:
             return jsonify({'error': 'time_remaining is required'}), 400
             
-        time_remaining = data.get('time_remaining')
-        
-        # --- REVERTED: Only handle manual pause requests --- 
-        # Client now handles the transition to 'between_rounds' locally
+        time_remaining_raw = data.get('time_remaining')
+
+        # Validate and convert time_remaining
+        try:
+            time_remaining = int(time_remaining_raw)
+        except (ValueError, TypeError):
+            current_app.logger.warning(f"Invalid time_remaining value received: {time_remaining_raw}")
+            return jsonify({"error": "'time_remaining' must be an integer"}), 400
+
+        # Call the service
+        current_app.logger.info(f"Calling EventTimerService.pause_round for event {event_id} with time {time_remaining}")
         result = EventTimerService.pause_round(event_id, time_remaining)
-        print(f"Event {event_id}: Pausing round with {time_remaining}s left.")
-        # ------------------------------------------------------
+        current_app.logger.info(f"EventTimerService.pause_round returned: {result}")
         
-        if 'error' in result:
-            return jsonify(result), 400
-            
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
+        if result is None or 'error' in result: # Check if repo returned None or service added error
+            current_app.logger.error(f"Error received from EventTimerService.pause_round: {result}")
+            return jsonify(result or {'error': 'Failed to pause timer in service/repository'}), 400 # Use 400 or appropriate
             
         return jsonify(result), 200
         
     except Exception as e:
-        print(f"Error pausing round for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to pause round'}), 500
+        # Log the full traceback for any unexpected error during the route execution
+        current_app.logger.error(f"UNEXPECTED ERROR in pause_round route (event {event_id}): {str(e)}", exc_info=True)
+        db.session.rollback() # Attempt rollback
+        return jsonify({'error': 'An internal server error occurred while pausing the timer'}), 500
 
 
 @event_bp.route('/events/<int:event_id>/timer/resume', methods=['POST'])
@@ -710,20 +717,20 @@ def resume_round(event_id):
             return jsonify({'error': 'Unauthorized to manage event timer'}), 403
         
         # Resume the round
+        current_app.logger.info(f"Calling EventTimerService.resume_round for event {event_id}")
         result = EventTimerService.resume_round(event_id)
+        current_app.logger.info(f"EventTimerService.resume_round returned: {result}")
         
-        if 'error' in result:
-            return jsonify(result), 400
-            
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
+        if result is None or 'error' in result:
+            current_app.logger.error(f"Error received from EventTimerService.resume_round: {result}")
+            return jsonify(result or {'error': 'Failed to resume timer in service/repository'}), 400
             
         return jsonify(result), 200
         
     except Exception as e:
-        print(f"Error resuming round for event {event_id}: {str(e)}")
-        return jsonify({'error': 'Failed to resume round'}), 500
+        current_app.logger.error(f"UNEXPECTED ERROR in resume_round route (event {event_id}): {str(e)}", exc_info=True)
+        db.session.rollback() # Attempt rollback
+        return jsonify({'error': 'An internal server error occurred while resuming the timer'}), 500
 
 
 @event_bp.route('/events/<int:event_id>/timer/next', methods=['POST'])
@@ -757,10 +764,6 @@ def next_round(event_id):
         if 'error' in result:
             return jsonify(result), 400
             
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
-            
         return jsonify(result), 200
         
     except Exception as e:
@@ -791,20 +794,26 @@ def update_round_duration(event_id):
         
         # Get round duration from request
         data = request.get_json() or {}
-        if 'round_duration' not in data:
-            return jsonify({'error': 'round_duration is required'}), 400
-            
-        round_duration = data.get('round_duration')
         
+        round_duration = data.get('round_duration') # Optional
+        break_duration = data.get('break_duration') # Optional
+
+        # Validate that at least one was provided
+        if round_duration is None and break_duration is None:
+            return jsonify({'error': 'Either round_duration or break_duration is required'}), 400
+        
+        # Convert to int if provided (handle potential ValueError)
+        try:
+            if round_duration is not None: round_duration = int(round_duration)
+            if break_duration is not None: break_duration = int(break_duration)
+        except (ValueError, TypeError):
+             return jsonify({'error': 'Durations must be integers'}), 400
+
         # Update round duration
-        result = EventTimerService.update_duration(event_id, round_duration)
+        result = EventTimerService.update_duration(event_id, round_duration, break_duration)
         
         if 'error' in result:
             return jsonify(result), 400
-            
-        # --- Broadcast Update ---
-        EventTimerService.broadcast_timer_update(event_id)
-        # ----------------------
             
         return jsonify(result), 200
         
@@ -848,15 +857,3 @@ def get_round_info(event_id):
     except Exception as e:
         print(f"Error retrieving round info for event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to retrieve round information'}), 500
-
-@event_bp.route('/events/<int:event_id>/sse', methods=['GET'])
-def handle_sse_requests(event_id):
-    """
-    This endpoint exists only to catch SSE connection attempts from clients
-    and return a proper 404 rather than a 405 Method Not Allowed error.
-    """
-    current_app.logger.warning(f"Attempted SSE connection to non-existent endpoint for event {event_id}")
-    return jsonify({
-        "error": "Server-Sent Events are not supported",
-        "message": "This endpoint has been deprecated. Please use standard polling."
-    }), 404
