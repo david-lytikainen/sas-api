@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
@@ -12,6 +12,7 @@ from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
 from datetime import datetime
 from flask import current_app
+
 event_bp = Blueprint("event", __name__)
 
 
@@ -494,6 +495,7 @@ def get_all_schedules(event_id):
         print(f"Error retrieving all schedules for event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to retrieve schedules'}), 500
 
+
 @event_bp.route('/events/<int:event_id>/timer', methods=['GET'])
 @jwt_required()
 def get_timer_status(event_id):
@@ -580,11 +582,15 @@ def initialize_timer(event_id):
         round_duration = data.get('round_duration', 180)
         
         # Initialize timer
-        timer = EventTimerService.initialize_timer(event_id, round_duration)
+        timer_dict = EventTimerService.initialize_timer(event_id, round_duration)
+        
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
         
         return jsonify({
             'message': 'Timer initialized',
-            'timer': timer
+            'timer': timer_dict
         }), 200
         
     except Exception as e:
@@ -623,6 +629,10 @@ def start_round(event_id):
         if 'error' in result:
             return jsonify(result), 400
             
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
+            
         return jsonify(result), 200
         
     except Exception as e:
@@ -658,11 +668,18 @@ def pause_round(event_id):
             
         time_remaining = data.get('time_remaining')
         
-        # Pause the round
+        # --- REVERTED: Only handle manual pause requests --- 
+        # Client now handles the transition to 'between_rounds' locally
         result = EventTimerService.pause_round(event_id, time_remaining)
+        print(f"Event {event_id}: Pausing round with {time_remaining}s left.")
+        # ------------------------------------------------------
         
         if 'error' in result:
             return jsonify(result), 400
+            
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
             
         return jsonify(result), 200
         
@@ -697,6 +714,10 @@ def resume_round(event_id):
         
         if 'error' in result:
             return jsonify(result), 400
+            
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
             
         return jsonify(result), 200
         
@@ -736,6 +757,10 @@ def next_round(event_id):
         if 'error' in result:
             return jsonify(result), 400
             
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
+            
         return jsonify(result), 200
         
     except Exception as e:
@@ -743,7 +768,7 @@ def next_round(event_id):
         return jsonify({'error': 'Failed to advance to next round'}), 500
 
 
-@event_bp.route('/events/<int:event_id>/timer/duration', methods=['PATCH'])
+@event_bp.route('/events/<int:event_id>/timer/duration', methods=['PUT'])
 @jwt_required()
 def update_round_duration(event_id):
     current_user_id = get_jwt_identity()
@@ -776,6 +801,10 @@ def update_round_duration(event_id):
         
         if 'error' in result:
             return jsonify(result), 400
+            
+        # --- Broadcast Update ---
+        EventTimerService.broadcast_timer_update(event_id)
+        # ----------------------
             
         return jsonify(result), 200
         
@@ -819,3 +848,15 @@ def get_round_info(event_id):
     except Exception as e:
         print(f"Error retrieving round info for event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to retrieve round information'}), 500
+
+@event_bp.route('/events/<int:event_id>/sse', methods=['GET'])
+def handle_sse_requests(event_id):
+    """
+    This endpoint exists only to catch SSE connection attempts from clients
+    and return a proper 404 rather than a 405 Method Not Allowed error.
+    """
+    current_app.logger.warning(f"Attempted SSE connection to non-existent endpoint for event {event_id}")
+    return jsonify({
+        "error": "Server-Sent Events are not supported",
+        "message": "This endpoint has been deprecated. Please use standard polling."
+    }), 404

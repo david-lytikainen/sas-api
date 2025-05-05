@@ -4,6 +4,10 @@ from app.services.speed_date_service import SpeedDateService
 from datetime import datetime
 import pytz
 from typing import Dict, Any
+from flask import current_app
+
+# Import SSE utilities
+from app.sse_utils import announcer, format_sse 
 
 class EventTimerService:
     @staticmethod
@@ -93,7 +97,7 @@ class EventTimerService:
     
     @staticmethod
     def get_timer_status(event_id: int) -> Dict[str, Any]:
-        """Get the current timer status"""
+        """Get the current timer status from the database"""
         timer = EventTimerRepository.get_timer(event_id)
         if not timer:
             # We don't have a timer yet
@@ -108,32 +112,21 @@ class EventTimerService:
             "message": f"Round {timer.current_round}"
         }
         
-        # Calculate time remaining if round is active
-        if timer.round_start_time and not timer.is_paused:
-            try:
-                # Make sure we're comparing timezone-aware datetimes
-                current_time = datetime.now(pytz.UTC)
-                # Ensure the start time is timezone-aware (should already be from the DB)
-                if timer.round_start_time.tzinfo is None:
-                    # If it's naive for some reason, make it aware
-                    start_time = pytz.UTC.localize(timer.round_start_time)
-                else:
-                    start_time = timer.round_start_time
-                
-                elapsed = (current_time - start_time).total_seconds()
-                time_remaining = max(0, timer.round_duration - int(elapsed))
-                result["time_remaining"] = time_remaining
-                result["status"] = "active"
-            except Exception as e:
-                # Fallback in case of datetime error
-                print(f"Error calculating time remaining: {str(e)}")
-                result["time_remaining"] = timer.round_duration
-                result["status"] = "active"
-                
-        elif timer.is_paused:
-            result["time_remaining"] = timer.pause_time_remaining
+        # Determine status based on persisted state
+        if timer.is_paused:
             result["status"] = "paused"
+            # Return the time remaining when it was paused
+            result["time_remaining"] = timer.pause_time_remaining
+        elif timer.round_start_time:
+            result["status"] = "active"
+            # Indicate the full duration; client will calculate remaining based on start time
+            result["time_remaining"] = timer.round_duration 
+            # If resuming from pause, client needs this info
+            if timer.pause_time_remaining is not None:
+                # This signals to the client it was resumed and what time remained
+                 result["time_remaining"] = timer.pause_time_remaining 
         else:
             result["status"] = "inactive"
+            result["time_remaining"] = timer.round_duration # Or 0, depending on desired inactive display
         
-        return result 
+        return result

@@ -1,8 +1,8 @@
-from flask import Flask, jsonify, request, make_response, send_from_directory
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-from app.extensions import db, migrate, jwt, socketio
+from app.extensions import db, migrate, jwt
 from datetime import timedelta
 import logging
 
@@ -47,12 +47,11 @@ def create_app():
     cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5001,*').split(',')
     app.logger.info(f"Initializing CORS with origins: {cors_origins}")
     
-    # Use more specific CORS configuration for both API and Socket.IO
+    # Use more specific CORS configuration for API 
     CORS(
         app, 
         resources={
             r"/api/*": {"origins": cors_origins},
-            r"/socket.io/*": {"origins": cors_origins}
         },
         supports_credentials=True,
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -60,27 +59,6 @@ def create_app():
         expose_headers=["Content-Type"]
     )
     
-    # Set socket.io CORS allowed origins
-    app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'] = cors_origins
-    
-    # Initialize SocketIO with more explicit configuration
-    socketio.init_app(
-        app, 
-        cors_allowed_origins=cors_origins,
-        logger=True,
-        engineio_logger=True,
-        ping_timeout=60,
-        ping_interval=25,
-        async_mode='threading',
-        manage_session=False,
-        path='/socket.io/'
-    )
-    
-    app.logger.info(f"SocketIO initialized with path: /socket.io/ and CORS origins: {cors_origins}")
-
-    # Import socket event handlers
-    from app.sockets import event_sockets
-    app.logger.info("Socket event handlers registered")
 
     # Handle OPTIONS preflight requests
     @app.route('/<path:path>', methods=['OPTIONS'])
