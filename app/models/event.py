@@ -14,7 +14,10 @@ class Event(db.Model):
     starts_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False)
     address = db.Column(db.String(255), nullable=False)
     max_capacity = db.Column(db.Integer, nullable=False)
-    status = db.Column(db.Enum(EventStatus), nullable=False)
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+    )
     price_per_person = db.Column(db.DECIMAL(10, 2), nullable=False)
     registration_deadline = db.Column(db.TIMESTAMP(timezone=True), nullable=False)
     created_at = db.Column(
@@ -36,7 +39,7 @@ class Event(db.Model):
             "starts_at": self.starts_at.isoformat() if self.starts_at else None,
             "address": self.address,
             "max_capacity": self.max_capacity,
-            "status": self.status.value if self.status else None,
+            "status": self.status,
             "price_per_person": (
                 str(self.price_per_person) if self.price_per_person else None
             ),

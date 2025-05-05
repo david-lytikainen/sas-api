@@ -11,6 +11,7 @@ from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
 from datetime import datetime
+from flask import current_app
 event_bp = Blueprint("event", __name__)
 
 
@@ -136,12 +137,12 @@ def start_event(event_id):
         ):
             return jsonify({"error": "Unauthorized"}), 403
 
-        # Check event status
-        if event.status != EventStatus.REGISTRATION_OPEN:
+        # Check event status - using .value since status is now a string
+        if event.status != EventStatus.REGISTRATION_OPEN.value:
             return jsonify({'error': 'Event cannot be started'}), 400
             
-        # Update event status
-        event.status = EventStatus.IN_PROGRESS
+        # Update event status - using .value since status is now a string
+        event.status = EventStatus.IN_PROGRESS.value
         db.session.commit()
         
         # Generate speed dating schedule
@@ -210,21 +211,9 @@ def update_event_status(event_id):
         if not is_admin and not is_event_creator:
             return jsonify({'error': 'Unauthorized to update this event'}), 403
         
-        # Map the friendly status name to enum value
-        status_map = {
-            'Registration Open': EventStatus.REGISTRATION_OPEN,
-            'In Progress': EventStatus.IN_PROGRESS,
-            'Completed': EventStatus.COMPLETED,
-            'Cancelled': EventStatus.CANCELLED,
-            'Paused': EventStatus.PAUSED
-        }
-        
-        # Update the event status
-        if status in status_map:
-            event.status = status_map[status]
-            db.session.commit()
-        else:
-            return jsonify({'error': f'Invalid status: {status}'}), 400
+        # Now we can directly assign the status string
+        event.status = status
+        db.session.commit()
         
         return jsonify({'message': 'Event status updated successfully'}), 200
     except Exception as e:
@@ -446,7 +435,7 @@ def get_schedule(event_id):
         event = Event.query.get_or_404(event_id)
         
         # Check if event is in progress, paused, or completed
-        if event.status not in [EventStatus.IN_PROGRESS, EventStatus.COMPLETED, EventStatus.PAUSED]:
+        if event.status not in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value, EventStatus.PAUSED.value]:
             return jsonify({'error': 'Schedule not available. Event has not started'}), 400
             
         # Check if user is registered for this event
@@ -487,8 +476,13 @@ def get_all_schedules(event_id):
         if current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) != str(current_user_id):
             return jsonify({'error': 'Unauthorized'}), 403
         
+        # --- Add Logging --- 
+        current_app.logger.info(f"Checking status for event {event_id}. Current status in DB: {event.status}")
+        # -------------------
+        
         # Check if event is in progress, paused, or completed
-        if event.status not in [EventStatus.IN_PROGRESS, EventStatus.COMPLETED, EventStatus.PAUSED]:
+        if event.status not in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value, EventStatus.PAUSED.value]:
+            current_app.logger.warning(f"Event {event_id} status '{event.status}' is not valid for viewing schedules. Returning 400.") # Log why it fails
             return jsonify({'error': 'Schedule not available. Event has not started'}), 400
             
         # Get all schedules

@@ -1,31 +1,88 @@
-from app.extensions import socketio
+from app.extensions import socketio, logger
 from flask_socketio import emit, join_room, leave_room
 from app.services.event_timer_service import EventTimerService
 from flask_jwt_extended import decode_token
 from flask import request, current_app
 import json
-import logging
 
-logger = logging.getLogger(__name__)
+# Explicitly define the namespace for all handlers
+NAMESPACE = '/'
 
 @socketio.on('connect')
-def handle_connect(auth):
-    """Handle client connection with token authentication from auth payload."""
-    logger.info("Socket connection attempt with auth: %s", auth)
-    
-    if not auth or 'token' not in auth:
-        logger.error("Socket connection rejected: No token provided in auth payload.")
-        return False # Reject the connection
-    
-    token = auth['token']
+def handle_connect():
+    """Handle client connection with various token authentication methods."""
     try:
-        # Verify the token is valid
-        decode_token(token)
-        logger.info("Socket connection accepted: Valid JWT token from auth.")
-        return True  # Accept the connection
+        # Log connection attempt
+        logger.info(f"Socket connection attempt - request details: {request.sid}")
+        
+        # Debug request parameters
+        if hasattr(request, 'args'):
+            logger.info(f"Socket connection request args: {request.args}")
+        
+        if hasattr(request, 'headers'):
+            logger.info(f"Socket connection request headers: {request.headers}")
+        
+        # Extract token from various sources
+        token = None
+        
+        # Check for auth parameter in different formats
+        auth = None
+        if hasattr(request, 'args') and 'auth' in request.args:
+            auth = request.args.get('auth')
+            logger.info(f"Found auth parameter: {auth}")
+        
+        # Handle auth as object with token field
+        if auth:
+            try:
+                if isinstance(auth, dict) and 'token' in auth:
+                    token = auth['token']
+                    logger.info("Found token in auth object")
+                else:
+                    # Try to parse it as JSON if it's a string
+                    try:
+                        auth_obj = json.loads(auth)
+                        if isinstance(auth_obj, dict) and 'token' in auth_obj:
+                            token = auth_obj['token']
+                            logger.info("Found token in parsed auth JSON")
+                        else:
+                            # Use auth directly as token
+                            token = auth
+                            logger.info("Using auth parameter directly as token")
+                    except (json.JSONDecodeError, TypeError):
+                        # If parsing fails, use auth directly as token
+                        token = auth
+                        logger.info("Using auth parameter directly as token (parse failed)")
+            except Exception as e:
+                logger.error(f"Error extracting token from auth: {e}")
+                
+        # Check query parameters
+        if not token and hasattr(request, 'args') and 'token' in request.args:
+            token = request.args.get('token')
+            logger.info("Found token in query parameters")
+                
+        # Check headers
+        if not token and hasattr(request, 'headers') and request.headers.get('Authorization'):
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+                logger.info("Found token in Authorization header")
+        
+        if not token:
+            logger.error("Socket connection rejected: No token found in any location")
+            return False  # Reject the connection
+        
+        try:
+            # Verify token
+            decode_token(token)
+            logger.info(f"Socket connection accepted for {request.sid}: Valid JWT token")
+            return True  # Accept the connection
+        except Exception as e:
+            logger.error(f"Socket connection rejected: Invalid token: {str(e)}")
+            return False  # Reject the connection
+            
     except Exception as e:
-        logger.error(f"Socket connection rejected due to invalid token in auth: {str(e)}")
-        return False  # Reject the connection
+        logger.error(f"Socket connection error: {str(e)}")
+        return False  # Reject on any error
 
 @socketio.on('join')
 def handle_join(data):

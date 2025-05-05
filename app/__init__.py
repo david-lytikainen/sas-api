@@ -46,29 +46,37 @@ def create_app():
     # Set up CORS
     cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5001,*').split(',')
     app.logger.info(f"Initializing CORS with origins: {cors_origins}")
+    
+    # Use more specific CORS configuration for both API and Socket.IO
     CORS(
         app, 
-        resources={r"/api/*": {"origins": cors_origins}},
+        resources={
+            r"/api/*": {"origins": cors_origins},
+            r"/socket.io/*": {"origins": cors_origins}
+        },
         supports_credentials=True,
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"]
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+        expose_headers=["Content-Type"]
     )
     
-    # Set cors allowed origins as app config
-    app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5001", "*"]
+    # Set socket.io CORS allowed origins
+    app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'] = cors_origins
     
     # Initialize SocketIO with more explicit configuration
     socketio.init_app(
         app, 
-        cors_allowed_origins=app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'],
+        cors_allowed_origins=cors_origins,
         logger=True,
         engineio_logger=True,
         ping_timeout=60,
         ping_interval=25,
-        async_mode='threading'
+        async_mode='threading',
+        manage_session=False,
+        path='/socket.io/'
     )
     
-    app.logger.info("SocketIO initialized with CORS origins: %s", app.config['SOCKETIO_CORS_ALLOWED_ORIGINS'])
+    app.logger.info(f"SocketIO initialized with path: /socket.io/ and CORS origins: {cors_origins}")
 
     # Import socket event handlers
     from app.sockets import event_sockets

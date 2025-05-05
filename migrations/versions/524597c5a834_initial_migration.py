@@ -69,7 +69,7 @@ def upgrade():
     sa.Column('ends_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('address', sa.String(length=255), nullable=False),
     sa.Column('max_capacity', sa.Integer(), nullable=False),
-    sa.Column('status', sa.Enum('REGISTRATION_OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', name='eventstatus'), nullable=False),
+    sa.Column('status', sa.Enum('Registration Open', 'In Progress', 'Completed', 'Cancelled', 'Paused', name='eventstatus'), nullable=False),
     sa.Column('price_per_person', sa.DECIMAL(precision=10, scale=2), nullable=False),
     sa.Column('registration_deadline', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
