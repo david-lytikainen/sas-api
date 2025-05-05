@@ -141,9 +141,8 @@ def start_event(event_id):
         # --- Add Attendee Count Check --- 
         attendee_count = EventAttendee.query.filter(
             EventAttendee.event_id == event_id,
-            # Ensure we check for string values if the enum isn't automatically handled
-            # Or use the enum directly if the column type supports it
-            EventAttendee.status.in_([RegistrationStatus.REGISTERED.value, RegistrationStatus.CHECKED_IN.value])
+            # Compare against Enum members directly, not their .value strings
+            EventAttendee.status.in_([RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN])
         ).count()
         
         if attendee_count < 2:
@@ -158,19 +157,41 @@ def start_event(event_id):
         # Update event status - using .value since status is now a string
         event.status = EventStatus.IN_PROGRESS.value
         db.session.commit()
+        current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
         
-        # Generate speed dating schedule
-        schedule_success = SpeedDateService.generate_schedule(event_id)
+        # --- Start Timer for Round 1 --- 
+        try:
+            current_app.logger.info(f"Attempting to start timer for Round 1 for event {event_id}...")
+            timer_result = EventTimerService.start_round(event_id, round_number=1)
+            if 'error' in timer_result:
+                 current_app.logger.error(f"Failed to automatically start timer for event {event_id}: {timer_result['error']}")
+                 # Proceed with event start, but log timer error
+                 schedule_success = SpeedDateService.generate_schedule(event_id)
+                 return jsonify({'message': f'Event started, but failed to initialize timer: {timer_result['error']}'}), 500 # Return 500 if timer fails?
+            else:
+                current_app.logger.info(f"Successfully started timer for Round 1 for event {event_id}.")
+                # --- Generate Schedule (only if timer started successfully?) ---
+                schedule_success = SpeedDateService.generate_schedule(event_id)
+        except Exception as timer_start_error:
+             current_app.logger.error(f"Exception occurred while trying to start timer for event {event_id}: {str(timer_start_error)}", exc_info=True)
+             # Proceed but indicate timer error
+             schedule_success = False # Assume schedule might depend on timer?
+             return jsonify({'message': 'Event started, but encountered an exception during timer initialization.'}), 500
+        # --- End Start Timer ---
+
+        # Generate speed dating schedule - Moved inside timer success block
+        # schedule_success = SpeedDateService.generate_schedule(event_id)
         
         if schedule_success:
-            return jsonify({'message': 'Event started successfully and schedule generated'})
+            return jsonify({'message': 'Event started successfully, timer initialized for Round 1, and schedule generated'})
         else:
-            # If schedule generation fails, log but still return success for starting the event
-            print(f"Warning: Event {event_id} started but schedule generation failed")
-            return jsonify({'message': 'Event started successfully but schedule could not be generated. Please generate it manually.'})
+            # Timer might have started, but schedule failed
+            current_app.logger.warning(f"Event {event_id} started and timer initialized, but schedule generation failed")
+            return jsonify({'message': 'Event started and timer initialized, but schedule could not be generated. Please generate it manually.'})
+            
     except Exception as e:
         db.session.rollback()
-        print(f"Error starting event {event_id}: {str(e)}")
+        current_app.logger.error(f"Error starting event {event_id}: {str(e)}", exc_info=True) # Log full traceback
         return jsonify({'error': 'Failed to start event'}), 500
 
 @event_bp.route('/events/<int:event_id>/check-in', methods=['POST'])

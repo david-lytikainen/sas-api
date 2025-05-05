@@ -129,18 +129,28 @@ class EventTimerService:
         # Determine status based on persisted state
         if timer.is_paused:
             result["status"] = "paused"
-            # Return the time remaining when it was paused
             result["time_remaining"] = timer.pause_time_remaining
         elif timer.round_start_time:
+            # Timer has started and is not paused, it must be active
             result["status"] = "active"
-            # Indicate the full duration; client will calculate remaining based on start time
-            result["time_remaining"] = timer.round_duration 
-            # If resuming from pause, client needs this info
-            if timer.pause_time_remaining is not None:
-                # This signals to the client it was resumed and what time remained
-                 result["time_remaining"] = timer.pause_time_remaining 
+            # Determine the correct remaining time to send to the client
+            if timer.pause_time_remaining is not None and timer.is_paused is False:
+                # It was just resumed, use the paused remaining time
+                result["time_remaining"] = timer.pause_time_remaining
+            else:
+                # It's a normally running timer or just started, send the full duration
+                # The client calculates the actual countdown from the round_start_time
+                result["time_remaining"] = timer.round_duration
         else:
+            # If it's not paused and hasn't started, it's inactive (e.g., between rounds or before start)
             result["status"] = "inactive"
-            result["time_remaining"] = timer.round_duration # Or 0, depending on desired inactive display
+            result["time_remaining"] = 0 # Inactive timer has 0 time remaining displayed
         
+        # Clean up pause_time_remaining if the timer is now active and running normally
+        # This prevents confusion on subsequent status checks after resuming
+        if result["status"] == "active" and timer.pause_time_remaining is not None:
+             # We could potentially clear timer.pause_time_remaining in the resume_round repository method instead.
+             # For now, just ensure the response reflects the state correctly.
+             pass # Keep the logic as is for now, client handles countdown.
+             
         return result
