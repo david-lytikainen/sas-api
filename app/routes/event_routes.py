@@ -98,7 +98,7 @@ def create_event():
     except Exception as e:
         db.session.rollback()
         print(f"Error creating event: {str(e)}")
-        return jsonify({"error": "Failed to create event"}), 500
+        return jsonify({"error": f"Failed to create event: {e}"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/register", methods=["POST"])
@@ -115,8 +115,8 @@ def cancel_registration(event_id):
         
     verify_jwt_in_request() 
     user_id = get_jwt_identity()
-    response, status_code = EventService.cancel_registration(event_id, user_id)
-    return jsonify(response), status_code
+    response = EventService.cancel_registration(event_id, user_id)
+    return jsonify(response)
 
 
 @event_bp.route("/events/<int:event_id>/start", methods=["POST"])
