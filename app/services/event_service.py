@@ -49,7 +49,7 @@ class EventService:
             'starts_at': datetime.fromisoformat(data['starts_at'].replace('Z', '+00:00')),
             'address': data['address'],
             'max_capacity': data['max_capacity'],
-            'status': EventStatus.REGISTRATION_OPEN,
+            'status': EventStatus.REGISTRATION_OPEN.value,
             'price_per_person': Decimal(str(data['price_per_person'])),
             'registration_deadline': datetime.fromisoformat(data['starts_at'].replace('Z', '+00:00'))
         })
@@ -59,7 +59,7 @@ class EventService:
     @staticmethod
     def register_for_event(event_id: int, user_id: int):
         event = EventRepository.get_event(event_id)
-        if event.status != EventStatus.REGISTRATION_OPEN:
+        if event.status != EventStatus.REGISTRATION_OPEN.value:
             return {'error': 'Event is not open for registration'}
         
         # Check if user is already registered for this event

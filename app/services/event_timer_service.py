@@ -4,18 +4,9 @@ from app.services.speed_date_service import SpeedDateService
 from datetime import datetime
 import pytz
 from typing import Dict, Any
+from flask import current_app
 
 class EventTimerService:
-    @staticmethod
-    def initialize_timer(event_id: int, round_duration: int = 180) -> Dict[str, Any]:
-        """Initialize a timer for an event"""
-        # Check if timer already exists
-        timer = EventTimerRepository.get_timer(event_id)
-        if not timer:
-            timer = EventTimerRepository.create_timer(event_id, round_duration)
-        
-        return timer.to_dict()
-    
     @staticmethod
     def start_round(event_id: int, round_number: int = None) -> Dict[str, Any]:
         """Start a specific round or the current round"""
@@ -31,28 +22,40 @@ class EventTimerService:
         }
     
     @staticmethod
-    def pause_round(event_id: int, time_remaining: int) -> Dict[str, Any]:
+    def pause_round(event_id: int, time_remaining: int | None = None) -> Dict[str, Any]:
         """Pause the current round"""
+        # Pass the potentially None time_remaining down to the repository
         timer = EventTimerRepository.pause_round(event_id, time_remaining)
         if not timer:
-            return {"error": "Timer not found"}
+            # Use the log messages from the repository now
+            return {"error": "Timer not found or could not be paused"} 
+        
+        # Use the actual pause_time_remaining stored by the repo
+        actual_remaining = timer.pause_time_remaining if timer.pause_time_remaining is not None else 0
         
         return {
             "timer": timer.to_dict(),
-            "message": f"Round {timer.current_round} paused with {time_remaining} seconds remaining"
+            "message": f"Round {timer.current_round} paused with {actual_remaining} seconds remaining"
         }
     
     @staticmethod
     def resume_round(event_id: int) -> Dict[str, Any]:
         """Resume a paused round"""
-        timer = EventTimerRepository.resume_round(event_id)
-        if not timer:
-            return {"error": "Timer not found"}
-        
-        return {
-            "timer": timer.to_dict(),
-            "message": f"Round {timer.current_round} resumed with {timer.pause_time_remaining} seconds remaining"
-        }
+        current_app.logger.info(f"EventTimerService: Attempting to resume round for event {event_id}")
+        try:
+            timer = EventTimerRepository.resume_round(event_id)
+            if not timer:
+                current_app.logger.warning(f"EventTimerService: Timer not found or could not be resumed for event {event_id}")
+                return {"error": "Timer not found or is not paused"}
+            
+            current_app.logger.info(f"EventTimerService: Round resumed successfully for event {event_id}. Timer state: {timer.to_dict()}")
+            return {
+                "timer": timer.to_dict(),
+                "message": f"Round {timer.current_round} resumed with {timer.pause_time_remaining} seconds remaining"
+            }
+        except Exception as e:
+             current_app.logger.error(f"Error in EventTimerService.resume_round (event {event_id}): {str(e)}", exc_info=True)
+             return {"error": "An internal error occurred in the timer service during resume"}
     
     @staticmethod
     def next_round(event_id: int, max_rounds: int = 10) -> Dict[str, Any]:
@@ -77,23 +80,38 @@ class EventTimerService:
         }
     
     @staticmethod
-    def update_duration(event_id: int, round_duration: int) -> Dict[str, Any]:
-        """Update the round duration"""
-        if round_duration < 30 or round_duration > 900:  # 30s to 15min
-            return {"error": "Round duration must be between 30 and 900 seconds"}
+    def update_duration(event_id: int, round_duration: int = None, break_duration: int = None) -> Dict[str, Any]:
+        """Update the round and/or break duration"""
+        updates = {}
+        messages = []
+
+        if round_duration is not None:
+            if round_duration < 30 or round_duration > 900:  # 30s to 15min
+                return {"error": "Round duration must be between 30 and 900 seconds"}
+            updates['round_duration'] = round_duration
+            messages.append(f"Round duration updated to {round_duration} seconds")
+
+        if break_duration is not None:
+            if break_duration < 15 or break_duration > 600: # 15s to 10min break
+                 return {"error": "Break duration must be between 15 and 600 seconds"}
+            updates['break_duration'] = break_duration
+            messages.append(f"Break duration updated to {break_duration} seconds")
         
-        timer = EventTimerRepository.update_timer(event_id, round_duration=round_duration)
+        if not updates:
+            return {"error": "No duration values provided to update"}
+
+        timer = EventTimerRepository.update_timer(event_id, **updates)
         if not timer:
             return {"error": "Timer not found"}
         
         return {
             "timer": timer.to_dict(),
-            "message": f"Round duration updated to {round_duration} seconds"
+            "message": ". ".join(messages)
         }
     
     @staticmethod
     def get_timer_status(event_id: int) -> Dict[str, Any]:
-        """Get the current timer status"""
+        """Get the current timer status from the database"""
         timer = EventTimerRepository.get_timer(event_id)
         if not timer:
             # We don't have a timer yet
@@ -108,32 +126,31 @@ class EventTimerService:
             "message": f"Round {timer.current_round}"
         }
         
-        # Calculate time remaining if round is active
-        if timer.round_start_time and not timer.is_paused:
-            try:
-                # Make sure we're comparing timezone-aware datetimes
-                current_time = datetime.now(pytz.UTC)
-                # Ensure the start time is timezone-aware (should already be from the DB)
-                if timer.round_start_time.tzinfo is None:
-                    # If it's naive for some reason, make it aware
-                    start_time = pytz.UTC.localize(timer.round_start_time)
-                else:
-                    start_time = timer.round_start_time
-                
-                elapsed = (current_time - start_time).total_seconds()
-                time_remaining = max(0, timer.round_duration - int(elapsed))
-                result["time_remaining"] = time_remaining
-                result["status"] = "active"
-            except Exception as e:
-                # Fallback in case of datetime error
-                print(f"Error calculating time remaining: {str(e)}")
-                result["time_remaining"] = timer.round_duration
-                result["status"] = "active"
-                
-        elif timer.is_paused:
-            result["time_remaining"] = timer.pause_time_remaining
+        # Determine status based on persisted state
+        if timer.is_paused:
             result["status"] = "paused"
+            result["time_remaining"] = timer.pause_time_remaining
+        elif timer.round_start_time:
+            # Timer has started and is not paused, it must be active
+            result["status"] = "active"
+            # Determine the correct remaining time to send to the client
+            if timer.pause_time_remaining is not None and timer.is_paused is False:
+                # It was just resumed, use the paused remaining time
+                result["time_remaining"] = timer.pause_time_remaining
+            else:
+                # It's a normally running timer or just started, send the full duration
+                # The client calculates the actual countdown from the round_start_time
+                result["time_remaining"] = timer.round_duration
         else:
+            # If it's not paused and hasn't started, it's inactive (e.g., between rounds or before start)
             result["status"] = "inactive"
+            result["time_remaining"] = 0 # Inactive timer has 0 time remaining displayed
         
-        return result 
+        # Clean up pause_time_remaining if the timer is now active and running normally
+        # This prevents confusion on subsequent status checks after resuming
+        if result["status"] == "active" and timer.pause_time_remaining is not None:
+             # We could potentially clear timer.pause_time_remaining in the resume_round repository method instead.
+             # For now, just ensure the response reflects the state correctly.
+             pass # Keep the logic as is for now, client handles countdown.
+             
+        return result

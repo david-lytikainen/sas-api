@@ -16,6 +16,8 @@ from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
 from random import randint, randrange
 from werkzeug.security import generate_password_hash
+from create_admin import create_admin_user
+
 app = create_app()
 
 
@@ -84,7 +86,7 @@ def create_test_event(creator_id):
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
-        status=EventStatus.REGISTRATION_OPEN,
+        status=EventStatus.REGISTRATION_OPEN.value,
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
@@ -108,6 +110,7 @@ def create_test_attendees(test_users, test_event):
             user_id=user.id,
             status=RegistrationStatus.CHECKED_IN,  # Making them all checked in for testing
             check_in_date=datetime.now(),  # Since we're testing speed dating matching
+            pin="1234",
         )
         test_attendees.append(attendee)
 
@@ -141,6 +144,7 @@ def main():
         test_users = create_test_users()
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
+        create_admin_user(update=True)  # (update=True)
 
 
 if __name__ == "__main__":

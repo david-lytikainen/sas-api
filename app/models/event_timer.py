@@ -11,6 +11,7 @@ class EventTimer(db.Model):
     round_start_time = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
     is_paused = db.Column(db.Boolean, nullable=False, default=False)
     pause_time_remaining = db.Column(db.Integer, nullable=True)  # Seconds remaining when paused
+    break_duration = db.Column(db.Integer, nullable=False, default=90) # Default break duration in seconds
     created_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())
     updated_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
     
@@ -25,5 +26,6 @@ class EventTimer(db.Model):
             'round_duration': self.round_duration,
             'round_start_time': self.round_start_time.isoformat() if self.round_start_time else None,
             'is_paused': self.is_paused,
-            'pause_time_remaining': self.pause_time_remaining
+            'pause_time_remaining': self.pause_time_remaining,
+            'break_duration': self.break_duration
         } 

@@ -1,8 +1,8 @@
-"""initial migration
+"""initial
 
-Revision ID: 524597c5a834
+Revision ID: 04badbee318c
 Revises: 
-Create Date: 2025-04-16 11:03:36.182864
+Create Date: 2025-04-15 22:30:16.799555
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '524597c5a834'
+revision = '04badbee318c'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -69,7 +69,7 @@ def upgrade():
     sa.Column('ends_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('address', sa.String(length=255), nullable=False),
     sa.Column('max_capacity', sa.Integer(), nullable=False),
-    sa.Column('status', sa.Enum('Registration Open', 'In Progress', 'Completed', 'Cancelled', 'Paused', name='eventstatus'), nullable=False),
+    sa.Column('status', sa.Enum('REGISTRATION_OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', name='eventstatus'), nullable=False),
     sa.Column('price_per_person', sa.DECIMAL(precision=10, scale=2), nullable=False),
     sa.Column('registration_deadline', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
