@@ -21,4 +21,5 @@ jobs:
             git pull origin ${{ github.ref_name }}
             source /home/ubuntu/SAS/sas-api/venv/bin/activate
             pip install -r requirements.txt
+            black .
             sudo systemctl restart SAS.service 

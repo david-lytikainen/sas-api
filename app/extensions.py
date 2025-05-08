@@ -10,4 +10,3 @@ logger = logging.getLogger(__name__)
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-

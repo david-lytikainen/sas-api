@@ -11,7 +11,9 @@ class EventAttendee(db.Model):
     status = db.Column(db.Enum(RegistrationStatus), nullable=False)
 
     pin = db.Column(db.String(4), nullable=True)
-    registration_date = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())
+    registration_date = db.Column(
+        db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
+    )
     check_in_date = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
     updated_at = db.Column(
         db.TIMESTAMP(timezone=True),

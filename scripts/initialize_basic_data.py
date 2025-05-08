@@ -9,6 +9,7 @@ from app import create_app, db
 from app.models.enums import UserRole
 from sqlalchemy.sql import text
 
+
 def initialize_basic_data():
     """Initialize basic data like roles"""
     app = create_app()
@@ -18,14 +19,16 @@ def initialize_basic_data():
         try:
             # Insert roles directly using SQL
             db.session.execute(
-                text("""
+                text(
+                    """
                 INSERT INTO roles (id, name, permission_level) 
                 VALUES 
                 (1, 'Attendee', 1),
                 (2, 'Event Organizer', 2),
                 (3, 'Admin', 3)
                 ON CONFLICT (id) DO NOTHING;
-                """)
+                """
+                )
             )
             db.session.commit()
             print("Roles initialized successfully!")
@@ -33,5 +36,6 @@ def initialize_basic_data():
             db.session.rollback()
             print(f"Error initializing roles: {e}")
 
+
 if __name__ == "__main__":
-    initialize_basic_data() 
+    initialize_basic_data()

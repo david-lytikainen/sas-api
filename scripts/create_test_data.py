@@ -138,6 +138,7 @@ def delete_test_data():
         print(f"Error deleting test data: {e}")
         raise
 
+
 def main():
     with app.app_context():
         delete_test_data()

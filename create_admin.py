@@ -29,12 +29,13 @@ def create_admin_user(update=False):
             db.session.commit()
             print("Admin user created successfully!")
         elif update:
-            admin.password = generate_password_hash('admin123')
+            admin.password = generate_password_hash("admin123")
             admin.role_id = 3
             db.session.commit()
             print("Admin user updated successfully!")
         else:
             print("Admin user already exists!")
 
-if __name__ == '__main__':
-    create_admin_user(update=True) 
+
+if __name__ == "__main__":
+    create_admin_user(update=True)

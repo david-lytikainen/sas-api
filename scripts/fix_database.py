@@ -8,6 +8,7 @@ sys.path.append(
 from app import create_app, db
 from flask_migrate import upgrade
 
+
 def fix_database():
     """Apply migrations to fix the database schema"""
     app = create_app()
@@ -16,5 +17,6 @@ def fix_database():
         upgrade()
         print("Database migrations applied successfully!")
 
+
 if __name__ == "__main__":
-    fix_database() 
+    fix_database()

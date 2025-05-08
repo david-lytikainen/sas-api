@@ -42,7 +42,7 @@ def create_app():
         app=app,
         default_limits=["10 per minute, 300 per hour, 1000 per day"],
         storage_uri=os.getenv("LIMITER_DATABASE_URL", "memory://"),
-        strategy="fixed-window" 
+        strategy="fixed-window",
     )
 
     # Initialize Flask extensions
@@ -54,38 +54,42 @@ def create_app():
     from app.routes.user_routes import user_bp
     from app.routes.event_routes import event_bp
     from app.routes.admin_routes import admin_bp
-    app.register_blueprint(user_bp, url_prefix='/api/user')
-    app.register_blueprint(event_bp, url_prefix='/api')
-    app.register_blueprint(admin_bp, url_prefix='/api')
+
+    app.register_blueprint(user_bp, url_prefix="/api/user")
+    app.register_blueprint(event_bp, url_prefix="/api")
+    app.register_blueprint(admin_bp, url_prefix="/api")
 
     # Set up CORS
-    cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5001,*').split(',')
+    cors_origins = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5001,*",
+    ).split(",")
     app.logger.info(f"Initializing CORS with origins: {cors_origins}")
-    
-    # Use more specific CORS configuration for API 
+
+    # Use more specific CORS configuration for API
     CORS(
-        app, 
+        app,
         resources={
             r"/api/*": {"origins": cors_origins},
         },
         supports_credentials=True,
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept"],
-        expose_headers=["Content-Type"]
+        expose_headers=["Content-Type"],
     )
-    
 
     # Handle OPTIONS preflight requests
-    @app.route('/<path:path>', methods=['OPTIONS'])
+    @app.route("/<path:path>", methods=["OPTIONS"])
     def handle_options(path):
-        return '', 200
-        
+        return "", 200
+
     # Serve static files (like sounds)
-    @app.route('/sounds/<path:filename>')
+    @app.route("/sounds/<path:filename>")
     def serve_sounds(filename):
-        static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static/sounds')
+        static_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static/sounds"
+        )
         app.logger.info(f"Serving sound file {filename} from {static_dir}")
         return send_from_directory(static_dir, filename)
-
 
     return app
