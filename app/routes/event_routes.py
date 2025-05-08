@@ -13,6 +13,7 @@ from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
 from datetime import datetime, timedelta, timezone
 from flask import current_app
+from sqlalchemy import and_, or_
 
 event_bp = Blueprint("event", __name__)
 
@@ -1002,3 +1003,62 @@ def submit_speed_date_selections(event_id):
         db.session.rollback()
         current_app.logger.error(f"Outer exception submitting speed date selections for event {event_id}, user {current_user_id}: {str(e)}", exc_info=True)
         return jsonify({'error': 'Failed to submit speed date selections.'}), 500
+
+@event_bp.route('/events/<int:event_id>/my-matches', methods=['GET'])
+@jwt_required()
+def get_my_matches(event_id):
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found or token invalid"}), 401
+
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    if event.status != EventStatus.COMPLETED.value: 
+        return jsonify({"error": "Matches are only available for completed events"}), 400
+
+    attendee_record = EventAttendee.query.filter(
+        EventAttendee.event_id == event_id,
+        EventAttendee.user_id == current_user_id,
+        EventAttendee.status == RegistrationStatus.CHECKED_IN
+    ).first()
+
+    if not attendee_record:
+        return jsonify({"error": "You were not checked in for this event, or the event is not yet completed for you."}), 403
+
+    # Find matches for the current user in the specified event
+    mutual_matches_query = EventSpeedDate.query.filter(
+        EventSpeedDate.event_id == event_id,
+        EventSpeedDate.male_interested == True,
+        EventSpeedDate.female_interested == True,
+        or_(
+            EventSpeedDate.male_id == current_user_id,
+            EventSpeedDate.female_id == current_user_id
+        )
+    ).all()
+
+    matches_details = []
+    if mutual_matches_query:
+        for record in mutual_matches_query:
+            matched_user_id = None
+            if record.male_id == current_user_id:
+                matched_user_id = record.female_id
+            else:
+                matched_user_id = record.male_id
+            
+            if matched_user_id:
+                matched_user = User.query.get(matched_user_id)
+                if matched_user:
+                    matches_details.append({
+                        "id": matched_user.id,
+                        "first_name": matched_user.first_name,
+                        "last_name": matched_user.last_name,
+                        "email": matched_user.email,
+                        "age": matched_user.calculate_age(),
+                        "gender": matched_user.gender.value if matched_user.gender else None,
+                    })
+
+    return jsonify({"matches": matches_details}), 200
