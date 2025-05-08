@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, Response, stream_with_context
+from flask import Blueprint, jsonify, request
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
@@ -337,7 +337,7 @@ def get_event_attendee_pins(event_id):
                 'name': f"{user.first_name} {user.last_name}",
                 'email': user.email,
                 'pin': attendee.pin,
-                'status': attendee.status.value
+                'status': attendee.status.value if attendee.status else None
             }
             for attendee, user in attendees
         ]

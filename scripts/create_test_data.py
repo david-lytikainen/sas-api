@@ -14,7 +14,7 @@ from app.models.event_attendee import EventAttendee
 from app.models.event_speed_date import EventSpeedDate
 from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
-from random import randint, randrange
+from random import randrange
 from werkzeug.security import generate_password_hash
 from create_admin import create_admin_user
 
