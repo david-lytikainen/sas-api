@@ -910,33 +910,38 @@ def submit_speed_date_selections(event_id):
     
     try:
         event = Event.query.get_or_404(event_id)
-        now_utc = datetime.now(timezone.utc) # Get current time in UTC
+        now_utc = datetime.now(timezone.utc) 
 
-        # Check if event status allows submission
         allowed_statuses = [EventStatus.IN_PROGRESS.value, EventStatus.PAUSED.value]
         is_allowed_status = event.status in allowed_statuses
 
         is_recently_completed = False
         if event.status == EventStatus.COMPLETED.value:
-            if event.updated_at:
-                 # Ensure updated_at is timezone-aware (assuming UTC storage)
+            # Ensure event.updated_at exists and is datetime object
+            if event.updated_at and isinstance(event.updated_at, datetime):
+                 # Ensure updated_at is timezone-aware (assuming UTC storage or convert)
                  updated_at_utc = event.updated_at.replace(tzinfo=timezone.utc) if event.updated_at.tzinfo is None else event.updated_at
                  time_since_completion = now_utc - updated_at_utc
                  if time_since_completion <= timedelta(hours=24):
                      is_recently_completed = True
-                     current_app.logger.info(f"Event {event_id} completed {time_since_completion} ago, within 24h window.")
+                     current_app.logger.info(f"Event {event_id} completed {time_since_completion} ago, within 24h submission window.")
                  else:
                      current_app.logger.warning(f"Event {event_id} completed more than 24 hours ago ({time_since_completion}). Selections closed for user {current_user_id}.")
             else:
-                 current_app.logger.warning(f"Event {event_id} is Completed but has no updated_at timestamp. Cannot verify 24-hour window.")
+                 # Log warning if updated_at is missing or not a datetime for a completed event
+                 current_app.logger.warning(f"Event {event_id} is Completed but has missing or invalid updated_at timestamp ({event.updated_at}). Cannot verify 24-hour submission window.")
 
-        current_app.logger.info(f"Event {event_id} status: {event.status}. Allowed Status Check: {is_allowed_status}. Recently Completed Check: {is_recently_completed}")
+        current_app.logger.info(f"Submission check for event {event_id}: Status='{event.status}'. Allowed Status Check={is_allowed_status}. Recently Completed Check={is_recently_completed}")
 
+        # If neither condition is met, reject the submission
         if not (is_allowed_status or is_recently_completed):
             current_app.logger.warning(f"Event {event_id} status '{event.status}' does not allow selections for user {current_user_id} at this time.")
-            return jsonify({'error': f'Speed date selections window is closed for this event. Current status: {event.status}'}), 400
+            error_message = f'Speed date selections window is closed for this event. Current status: {event.status}'
+            if event.status == EventStatus.COMPLETED.value and not is_recently_completed:
+                 error_message = 'Speed date selections window closed 24 hours after event completion.'
+            return jsonify({'error': error_message}), 400
         
-        # --- Rest of the function (attendee check, processing loop, commit/rollback) remains the same --- 
+        # Check if user is checked-in attendee
         attendee_record = EventAttendee.query.filter_by(event_id=event_id, user_id=current_user_id, status=RegistrationStatus.CHECKED_IN).first()
         if not attendee_record:
             current_app.logger.warning(f"User {current_user_id} is not a checked-in attendee for event {event_id} or selections not allowed.")
@@ -1017,19 +1022,35 @@ def get_my_matches(event_id):
     if not event:
         return jsonify({"error": "Event not found"}), 404
 
-    if event.status != EventStatus.COMPLETED.value: 
-        return jsonify({"error": "Matches are only available for completed events"}), 400
+    if event.status != EventStatus.COMPLETED.value:
+        return jsonify({"error": "Matches are only available after the event is completed."}), 400
+    else:
+        # Event is completed, check if 24 hours have passed since completion
+        now_utc = datetime.now(timezone.utc)
+        if event.updated_at and isinstance(event.updated_at, datetime):
+            updated_at_utc = event.updated_at.replace(tzinfo=timezone.utc) if event.updated_at.tzinfo is None else event.updated_at
+            time_since_completion = now_utc - updated_at_utc
+            
+            if time_since_completion < timedelta(hours=24):
+                # Less than 24 hours have passed
+                current_app.logger.info(f"Match request for completed event {event_id} denied. Only {time_since_completion} has passed.")
+                return jsonify({"error": "Matches will be available 24 hours after event completion."}), 403 
+            # Else (24 hours or more have passed), proceed to fetch matches below
+            current_app.logger.info(f"Match request for completed event {event_id} allowed. {time_since_completion} has passed.")
+        else:
+            # Handle case where completed event is missing a valid updated_at timestamp
+            current_app.logger.error(f"Cannot determine match availability for completed event {event_id}: missing or invalid updated_at ({event.updated_at})")
+            return jsonify({"error": "Cannot determine match availability time due to missing event completion data."}), 500 
 
     attendee_record = EventAttendee.query.filter(
         EventAttendee.event_id == event_id,
         EventAttendee.user_id == current_user_id,
-        EventAttendee.status == RegistrationStatus.CHECKED_IN
+        EventAttendee.status == RegistrationStatus.CHECKED_IN 
     ).first()
 
     if not attendee_record:
-        return jsonify({"error": "You were not checked in for this event, or the event is not yet completed for you."}), 403
+        return jsonify({"error": "You were not checked in for this event."}), 403 # Changed error msg slightly
 
-    # Find matches for the current user in the specified event
     mutual_matches_query = EventSpeedDate.query.filter(
         EventSpeedDate.event_id == event_id,
         EventSpeedDate.male_interested == True,
@@ -1042,23 +1063,21 @@ def get_my_matches(event_id):
 
     matches_details = []
     if mutual_matches_query:
+        matched_partner_ids = set()
         for record in mutual_matches_query:
-            matched_user_id = None
-            if record.male_id == current_user_id:
-                matched_user_id = record.female_id
-            else:
-                matched_user_id = record.male_id
-            
-            if matched_user_id:
-                matched_user = User.query.get(matched_user_id)
-                if matched_user:
-                    matches_details.append({
-                        "id": matched_user.id,
-                        "first_name": matched_user.first_name,
-                        "last_name": matched_user.last_name,
-                        "email": matched_user.email,
-                        "age": matched_user.calculate_age(),
-                        "gender": matched_user.gender.value if matched_user.gender else None,
-                    })
+            partner_id = record.female_id if record.male_id == current_user_id else record.male_id
+            matched_partner_ids.add(partner_id)
+        
+        if matched_partner_ids:
+            matched_users = User.query.filter(User.id.in_(matched_partner_ids)).all()
+            for matched_user in matched_users:
+                matches_details.append({
+                    "id": matched_user.id,
+                    "first_name": matched_user.first_name,
+                    "last_name": matched_user.last_name,
+                    "email": matched_user.email, 
+                    "age": matched_user.calculate_age(),
+                    "gender": matched_user.gender.value if matched_user.gender else None,
+                })
 
     return jsonify({"matches": matches_details}), 200
