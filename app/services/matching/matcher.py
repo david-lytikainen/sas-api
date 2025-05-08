@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 from app.models.user import User
 from app.models.enums import Gender
 from app.models.event_speed_date import EventSpeedDate
@@ -19,56 +19,53 @@ class SpeedDateMatcher:
         extended_age_difference: int = 4,
     ) -> Tuple[Dict[int, List[User]], Dict[int, User]]:
         """
-        Find all potential matches for each attendee.
-        +-3 years age difference (+-4 years if they don't have the threshold amount of potential dates)
+        Find all potential matches for each attendee based on gender and age criteria.
+        Returns a tuple: (dict mapping user_id to list of compatible partners, dict mapping user_id to User object)
         """
-        all_compatible_dates = {}
-        id_to_user = {}
+        all_compatible_dates: Dict[int, List[User]] = {}
+        id_to_user: Dict[int, User] = {}
 
-        # Initialize matches for all attendees
-        for attendee in males + females:
-            all_compatible_dates[attendee.id] = []
+        all_attendees = males + females
+        for attendee in all_attendees:
             id_to_user[attendee.id] = attendee
+            all_compatible_dates[attendee.id] = [] # Initialize empty list
 
-        # Find matches for each attendee
-        for attendee in males + females:
-            all_opposite_gender = females if attendee.gender == Gender.MALE else males
-
-            # Try with initial age range
-            compatible_dates = [
-                match
-                for match in all_opposite_gender
-                if abs(attendee.calculate_age() - match.calculate_age())
-                <= initial_age_difference
+        # Determine compatibility based on age difference
+        for attendee in all_attendees:
+            opposite_gender_list = females if attendee.gender == Gender.MALE else males
+            
+            # Initial age check
+            compatible_partners = [
+                partner for partner in opposite_gender_list 
+                if abs(attendee.calculate_age() - partner.calculate_age()) <= initial_age_difference
             ]
 
-            # If not enough matches, try extended age range
-            num_same_gender = (
-                len(females) if attendee.gender == Gender.FEMALE else len(males)
-            )
-            if len(compatible_dates) < SpeedDateMatcher.min_dates_threshold(
-                num_tables, num_rounds, num_same_gender
-            ):
-                compatible_dates = [
-                    match
-                    for match in all_opposite_gender
-                    if abs(attendee.calculate_age() - match.calculate_age())
-                    <= extended_age_difference
+            # Check threshold only if necessary (avoids recalculation)
+            if len(compatible_partners) < SpeedDateMatcher.min_dates_threshold(num_tables, num_rounds, len(opposite_gender_list)):
+                current_app.logger.debug(f"User {attendee.id} has {len(compatible_partners)} compatible partners (initial ≤{initial_age_difference}). Extending range.")
+                # Extended age check
+                compatible_partners = [
+                    partner for partner in opposite_gender_list 
+                    if abs(attendee.calculate_age() - partner.calculate_age()) <= extended_age_difference
                 ]
+                current_app.logger.debug(f"User {attendee.id} now has {len(compatible_partners)} compatible partners (extended ≤{extended_age_difference}).")
 
-            all_compatible_dates[attendee.id] = compatible_dates
+            all_compatible_dates[attendee.id] = compatible_partners
 
-        return (all_compatible_dates, id_to_user)
+        return all_compatible_dates, id_to_user
 
     @staticmethod
-    def min_dates_threshold(num_tables, num_rounds, num_same_gender) -> int:
+    def min_dates_threshold(num_tables, num_rounds, num_opposite_gender) -> int:
         """
-        Threshold that determines whether to extend the age range
-        first, calculate the max number of dates that person can have
-        then, take the floor of max_dates * .5
+        Threshold that determines whether to extend the age range.
+        Calculates the theoretical max number of dates someone could have and takes 50%.
+        Note: This is a heuristic and might need adjustment based on results.
         """
-        max_dates = math.ceil(num_tables * (num_rounds / num_same_gender))
-        return math.floor(max_dates * 0.5)
+        if num_opposite_gender == 0:
+            return 0 # Avoid division by zero
+        max_potential_dates = min(num_rounds, num_opposite_gender)
+        threshold = math.floor(max_potential_dates * 0.5)
+        return max(1, threshold) if max_potential_dates > 0 else 0
 
     @staticmethod
     def finalize_all_rounds(
@@ -81,87 +78,83 @@ class SpeedDateMatcher:
         """
         Creates every single speed date for this event.
         Returns:
-            list of all speed dates for the night
+            List of EventSpeedDate objects representing the schedule.
         """
+        males = [user for user in id_to_user.values() if user.gender == Gender.MALE]
+        females = [user for user in id_to_user.values() if user.gender == Gender.FEMALE]
+        
+        if not males or not females:
+            current_app.logger.warning(f"Event {event_id}: Cannot generate schedule with zero males or females.")
+            return []
+
+        num_males = len(males)
+        num_females = len(females)
+        num_active_tables = min(num_males, num_females, num_tables)
+
+        current_app.logger.info(f"Event {event_id}: Generating schedule for {num_males} males, {num_females} females, {num_rounds} rounds, {num_active_tables} active tables.")
+
+        # Assign fixed tables to males (up to num_active_tables)
+        male_table_assignments: Dict[int, int] = {}
+        males_at_tables = males[:num_active_tables]
+        for i, male in enumerate(males_at_tables):
+            male_table_assignments[male.id] = i + 1 # Tables are 1-indexed
+            current_app.logger.debug(f"  Assigning Male {male.id} to Table {i + 1}")
+        
+        # --- Scheduling Logic --- 
         event_speed_dates: List[EventSpeedDate] = []
-        rounds_completed_per_attendee: Dict[int, int] = {
-            k: 0 for k, _ in all_compatible_dates.items()
-        }
+        met_pairs: Set[Tuple[int, int]] = set()
+        female_ids = [f.id for f in females]
 
-        for current_round in range(1, num_rounds + 1):
-            current_app.logger.info(
-                "Filling up all tables for ROUND %d\n\n", current_round
-            )
-            # Sort attendees by number of rounds participated in then by most potential dates
-            sorted_attendees = sorted(
-                all_compatible_dates,
-                key=lambda user_id: (
-                    rounds_completed_per_attendee[user_id],
-                    -len(all_compatible_dates[user_id]),
-                ),
-            )
-            attendees_seated_this_round = set()
+        for round_number in range(1, num_rounds + 1):
+            current_app.logger.info(f"Event {event_id}: --- Generating Round {round_number} --- ")
+            # Females available at the start of this round
+            females_available_this_round = list(female_ids) 
+            # Simple cyclic rotation for females for this round
+            shift = (round_number - 1) % num_females
+            rotated_available_females = females_available_this_round[shift:] + females_available_this_round[:shift]
+            
+            females_seated_this_round = set()
+            tables_filled_this_round = 0
 
-            table_number = 1
-            for attendee_id in sorted_attendees:
-                attendee = id_to_user[attendee_id]
-                if attendee_id in attendees_seated_this_round:
-                    continue
+            # Iterate through the males who have fixed tables
+            for male_id, table_number in male_table_assignments.items():
+                found_partner_for_male = False
+                # Try to find a suitable partner from the rotated list
+                for female_id in rotated_available_females:
+                    # Check if female is already seated this round or if pair already met
+                    if female_id in females_seated_this_round or (male_id, female_id) in met_pairs:
+                        continue
+                    
+                    male_user = id_to_user[male_id]
+                    female_user = id_to_user[female_id]
+                    if female_user not in all_compatible_dates.get(male_id, []):
+                         current_app.logger.debug(f" Round {round_number}, T{table_number}: Male {male_id} skipping Female {female_id} due to age incompatibility.")
+                         continue
 
-                # sort this attendee's compatible dates by fewest rounds participated in then by age difference
-                sorted_compatible_dates = sorted(
-                    all_compatible_dates[attendee_id],
-                    key=lambda user: (
-                        rounds_completed_per_attendee[user.id],
-                        abs(user.calculate_age() - attendee.calculate_age()),
-                    ),
-                )
-
-                for compatible_date in sorted_compatible_dates:
-                    if compatible_date.id not in attendees_seated_this_round:
-                        male_id = (
-                            attendee_id
-                            if attendee.gender == Gender.MALE
-                            else compatible_date.id
-                        )
-                        female_id = (
-                            attendee_id
-                            if attendee.gender == Gender.FEMALE
-                            else compatible_date.id
-                        )
-
-                        # set attendee and compatible_date to have a table this round.
-                        SpeedDateMatcher.assign_table(
-                            event_speed_dates,
-                            event_id,
-                            male_id,
-                            female_id,
-                            table_number,
-                            current_round,
-                        )
-                        table_number += 1
-
-                        # track that both these people are now in the current round
-                        attendees_seated_this_round.update(
-                            [attendee_id, compatible_date.id]
-                        )
-                        rounds_completed_per_attendee[attendee_id] += 1
-                        rounds_completed_per_attendee[compatible_date.id] += 1
-
-                        # remove each other from their compatible dates list
-                        all_compatible_dates[attendee_id].remove(compatible_date)
-                        if attendee in all_compatible_dates[compatible_date.id]:
-                            all_compatible_dates[compatible_date.id].remove(attendee)
-                        break  # this attendee has a date this round. moving on to next...
-
-                if table_number > num_tables:
-                    current_app.logger.info(
-                        "All tables are filled for ROUND %d\n\n", current_round
+                    # --- Assign Date --- 
+                    current_app.logger.debug(f" Round {round_number}: Assigning Male {male_id} (Table {table_number}) with Female {female_id}")
+                    SpeedDateMatcher.assign_table(
+                        event_speed_dates,
+                        event_id,
+                        male_id,
+                        female_id,
+                        table_number, # Use male's fixed table number
+                        round_number,
                     )
+                    met_pairs.add((male_id, female_id))
+                    females_seated_this_round.add(female_id)
+                    rotated_available_females.remove(female_id)
+                    found_partner_for_male = True
+                    tables_filled_this_round += 1
                     break
+                
+                if not found_partner_for_male:
+                    current_app.logger.warning(f" Round {round_number}: Could not find suitable partner for Male {male_id} at Table {table_number}. Possible reasons: no compatible females left, or all compatible females already met.")
+            
+            current_app.logger.info(f"Event {event_id}: Finished Round {round_number}, {tables_filled_this_round}/{num_active_tables} tables filled.")
 
+        current_app.logger.info(f"Event {event_id}: Schedule generation complete. Total dates created: {len(event_speed_dates)}")
         return event_speed_dates
-        # TODO later: try to keep people at same table
 
     @staticmethod
     def assign_table(

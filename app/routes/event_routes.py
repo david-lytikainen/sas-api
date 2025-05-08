@@ -1,7 +1,8 @@
-from flask import Blueprint, jsonify, request, Response, stream_with_context
+from flask import Blueprint, jsonify, request
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
+from app.models.event_speed_date import EventSpeedDate
 from app.models.enums import EventStatus, RegistrationStatus, UserRole, Gender
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
@@ -10,10 +11,14 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from flask import current_app
+from sqlalchemy import and_, or_
 
 event_bp = Blueprint("event", __name__)
+
+# Apply default rate limit to all routes in this blueprint
+# limiter.limit("", apply_defaults=True)(event_bp)
 
 
 @event_bp.route("/events", methods=["GET", "OPTIONS"])
@@ -332,7 +337,7 @@ def get_event_attendee_pins(event_id):
                 'name': f"{user.first_name} {user.last_name}",
                 'email': user.email,
                 'pin': attendee.pin,
-                'status': attendee.status.value
+                'status': attendee.status.value if attendee.status else None
             }
             for attendee, user in attendees
         ]
@@ -878,3 +883,201 @@ def get_round_info(event_id):
     except Exception as e:
         print(f"Error retrieving round info for event {event_id}: {str(e)}")
         return jsonify({'error': 'Failed to retrieve round information'}), 500
+
+# New route for submitting speed date selections
+@event_bp.route('/events/<int:event_id>/speed-date-selections', methods=['POST', 'OPTIONS'])
+@cross_origin(supports_credentials=True) # If CORS is needed
+@jwt_required()
+def submit_speed_date_selections(event_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    # Ensure current_user_id is an integer for comparison
+    try:
+        current_user_id = int(get_jwt_identity())
+    except (ValueError, TypeError):
+         current_app.logger.error(f"Invalid JWT identity type: {get_jwt_identity()}. Expected an integer.")
+         return jsonify({'error': 'Invalid user identity in token.'}), 400 
+
+    data = request.get_json()
+    current_app.logger.info(f"User {current_user_id} submitting selections for event {event_id}. Received data: {data}")
+
+    if not data or 'selections' not in data or not isinstance(data['selections'], list):
+        current_app.logger.warning(f"Invalid payload structure from user {current_user_id} for event {event_id}. Data: {data}")
+        return jsonify({'error': 'Invalid payload. "selections" array is required.'}), 400
+
+    selections = data['selections']
+    
+    try:
+        event = Event.query.get_or_404(event_id)
+        now_utc = datetime.now(timezone.utc) 
+
+        allowed_statuses = [EventStatus.IN_PROGRESS.value, EventStatus.PAUSED.value]
+        is_allowed_status = event.status in allowed_statuses
+
+        is_recently_completed = False
+        if event.status == EventStatus.COMPLETED.value:
+            # Ensure event.updated_at exists and is datetime object
+            if event.updated_at and isinstance(event.updated_at, datetime):
+                 # Ensure updated_at is timezone-aware (assuming UTC storage or convert)
+                 updated_at_utc = event.updated_at.replace(tzinfo=timezone.utc) if event.updated_at.tzinfo is None else event.updated_at
+                 time_since_completion = now_utc - updated_at_utc
+                 if time_since_completion <= timedelta(hours=24):
+                     is_recently_completed = True
+                     current_app.logger.info(f"Event {event_id} completed {time_since_completion} ago, within 24h submission window.")
+                 else:
+                     current_app.logger.warning(f"Event {event_id} completed more than 24 hours ago ({time_since_completion}). Selections closed for user {current_user_id}.")
+            else:
+                 # Log warning if updated_at is missing or not a datetime for a completed event
+                 current_app.logger.warning(f"Event {event_id} is Completed but has missing or invalid updated_at timestamp ({event.updated_at}). Cannot verify 24-hour submission window.")
+
+        current_app.logger.info(f"Submission check for event {event_id}: Status='{event.status}'. Allowed Status Check={is_allowed_status}. Recently Completed Check={is_recently_completed}")
+
+        # If neither condition is met, reject the submission
+        if not (is_allowed_status or is_recently_completed):
+            current_app.logger.warning(f"Event {event_id} status '{event.status}' does not allow selections for user {current_user_id} at this time.")
+            error_message = f'Speed date selections window is closed for this event. Current status: {event.status}'
+            if event.status == EventStatus.COMPLETED.value and not is_recently_completed:
+                 error_message = 'Speed date selections window closed 24 hours after event completion.'
+            return jsonify({'error': error_message}), 400
+        
+        # Check if user is checked-in attendee
+        attendee_record = EventAttendee.query.filter_by(event_id=event_id, user_id=current_user_id, status=RegistrationStatus.CHECKED_IN).first()
+        if not attendee_record:
+            current_app.logger.warning(f"User {current_user_id} is not a checked-in attendee for event {event_id} or selections not allowed.")
+            return jsonify({'error': 'User is not a checked-in attendee for this event or selections are not allowed.'}), 403
+
+        updated_count = 0
+        errors = []
+        current_app.logger.info(f"Processing {len(selections)} selections for event {event_id}, user {current_user_id}.")
+
+        for selection_data in selections:
+            event_speed_date_id = selection_data.get('event_speed_date_id')
+            interested = selection_data.get('interested')
+
+            if event_speed_date_id is None or not isinstance(event_speed_date_id, int) or \
+               interested is None or not isinstance(interested, bool):
+                error_detail = f"Invalid selection format for item: {selection_data}"
+                current_app.logger.warning(f"Event {event_id}, User {current_user_id}: {error_detail}")
+                errors.append(error_detail)
+                continue
+
+            speed_date_entry = EventSpeedDate.query.filter_by(id=event_speed_date_id, event_id=event_id).first()
+
+            if not speed_date_entry:
+                error_detail = f"Speed date entry with ID {event_speed_date_id} not found for event {event_id}."
+                current_app.logger.warning(f"User {current_user_id}: {error_detail}")
+                errors.append(error_detail)
+                continue
+            
+            current_app.logger.info(f"Participant Check for Speed Date ID {event_speed_date_id}: Comparing current_user_id={current_user_id} against male_id={speed_date_entry.male_id} and female_id={speed_date_entry.female_id}")
+
+            if speed_date_entry.male_id != current_user_id and speed_date_entry.female_id != current_user_id:
+                error_detail = f"User {current_user_id} is not a participant in speed date ID {event_speed_date_id}."
+                current_app.logger.warning(error_detail)
+                errors.append(error_detail)
+                continue
+
+            try:
+                speed_date_entry.record_interest(user_id=current_user_id, interested=interested)
+                db.session.add(speed_date_entry) 
+                updated_count += 1
+            except ValueError as ve:
+                error_detail = f"Error recording interest for speed date ID {event_speed_date_id}: {str(ve)}"
+                current_app.logger.warning(f"User {current_user_id}: {error_detail}")
+                errors.append(error_detail)
+            except Exception as e_inner:
+                error_detail = f"Unexpected error for speed date ID {event_speed_date_id}: {str(e_inner)}"
+                current_app.logger.error(f"User {current_user_id}: {error_detail}", exc_info=True)
+                errors.append(error_detail)
+
+        if errors:
+            db.session.rollback() 
+            current_app.logger.warning(f"Rolling back due to errors for event {event_id}, user {current_user_id}. Errors: {errors}")
+            return jsonify({'error': 'Errors occurred while processing selections.', 'details': errors}), 400
+        
+        if updated_count == 0 and not errors: 
+             current_app.logger.info(f"No valid selections processed or no changes made for event {event_id}, user {current_user_id}.")
+             return jsonify({'message': 'No valid selections provided or no changes made.'}), 200
+
+        db.session.commit()
+        current_app.logger.info(f"User {current_user_id} successfully submitted {updated_count} selections for event {event_id}.")
+        return jsonify({'message': f'{updated_count} speed date selections recorded successfully.'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Outer exception submitting speed date selections for event {event_id}, user {current_user_id}: {str(e)}", exc_info=True)
+        return jsonify({'error': 'Failed to submit speed date selections.'}), 500
+
+@event_bp.route('/events/<int:event_id>/my-matches', methods=['GET'])
+@jwt_required()
+def get_my_matches(event_id):
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found or token invalid"}), 401
+
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    if event.status != EventStatus.COMPLETED.value:
+        return jsonify({"error": "Matches are only available after the event is completed."}), 400
+    else:
+        # Event is completed, check if 24 hours have passed since completion
+        now_utc = datetime.now(timezone.utc)
+        if event.updated_at and isinstance(event.updated_at, datetime):
+            updated_at_utc = event.updated_at.replace(tzinfo=timezone.utc) if event.updated_at.tzinfo is None else event.updated_at
+            time_since_completion = now_utc - updated_at_utc
+            
+            if time_since_completion < timedelta(hours=24):
+                # Less than 24 hours have passed
+                current_app.logger.info(f"Match request for completed event {event_id} denied. Only {time_since_completion} has passed.")
+                return jsonify({"error": "Matches will be available 24 hours after event completion."}), 403 
+            # Else (24 hours or more have passed), proceed to fetch matches below
+            current_app.logger.info(f"Match request for completed event {event_id} allowed. {time_since_completion} has passed.")
+        else:
+            # Handle case where completed event is missing a valid updated_at timestamp
+            current_app.logger.error(f"Cannot determine match availability for completed event {event_id}: missing or invalid updated_at ({event.updated_at})")
+            return jsonify({"error": "Cannot determine match availability time due to missing event completion data."}), 500 
+
+    attendee_record = EventAttendee.query.filter(
+        EventAttendee.event_id == event_id,
+        EventAttendee.user_id == current_user_id,
+        EventAttendee.status == RegistrationStatus.CHECKED_IN 
+    ).first()
+
+    if not attendee_record:
+        return jsonify({"error": "You were not checked in for this event."}), 403 # Changed error msg slightly
+
+    mutual_matches_query = EventSpeedDate.query.filter(
+        EventSpeedDate.event_id == event_id,
+        EventSpeedDate.male_interested == True,
+        EventSpeedDate.female_interested == True,
+        or_(
+            EventSpeedDate.male_id == current_user_id,
+            EventSpeedDate.female_id == current_user_id
+        )
+    ).all()
+
+    matches_details = []
+    if mutual_matches_query:
+        matched_partner_ids = set()
+        for record in mutual_matches_query:
+            partner_id = record.female_id if record.male_id == current_user_id else record.male_id
+            matched_partner_ids.add(partner_id)
+        
+        if matched_partner_ids:
+            matched_users = User.query.filter(User.id.in_(matched_partner_ids)).all()
+            for matched_user in matched_users:
+                matches_details.append({
+                    "id": matched_user.id,
+                    "first_name": matched_user.first_name,
+                    "last_name": matched_user.last_name,
+                    "email": matched_user.email, 
+                    "age": matched_user.calculate_age(),
+                    "gender": matched_user.gender.value if matched_user.gender else None,
+                })
+
+    return jsonify({"matches": matches_details}), 200
