@@ -111,7 +111,8 @@ class SpeedDateService:
                         "table": date.table_number,
                         "partner_id": partner_id,
                         "partner_name": f"{partner.first_name} {partner.last_name}",
-                        "partner_age": partner.calculate_age()
+                        "partner_age": partner.calculate_age(),
+                        "event_speed_date_id": date.id
                     })
             
             return schedule
