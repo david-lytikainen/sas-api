@@ -122,7 +122,7 @@ def create_event():
 def register_for_event(event_id):
     current_user_id = get_jwt_identity()
     response = EventService.register_for_event(event_id, current_user_id)
-    
+
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
         # Check for specific error messages that should return 400
@@ -134,7 +134,7 @@ def register_for_event(event_id):
             return jsonify(response), 400
         elif "Event with ID" in response["error"] and "not found" in response["error"]:
             return jsonify(response), 404
-    
+
     return jsonify(response)
 
 

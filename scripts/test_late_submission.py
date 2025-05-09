@@ -110,14 +110,16 @@ def set_event_starting_soon(event_id, db_url):
         return False
     try:
         engine = create_engine(db_url)
-        
+
         # Get the creator_id from the admin user
         creator_id = get_user_id_from_email(TEST_UNREGISTERED_EMAIL, db_url)
         if not creator_id:
             print(f"Could not find user ID for {TEST_UNREGISTERED_EMAIL}")
             # Fallback to finding any admin user
             with engine.connect() as connection:
-                query = text("SELECT id FROM users WHERE role_id = 3 LIMIT 1")  # Admin role_id = 3
+                query = text(
+                    "SELECT id FROM users WHERE role_id = 3 LIMIT 1"
+                )  # Admin role_id = 3
                 result = connection.execute(query)
                 admin = result.fetchone()
                 if admin:
@@ -126,26 +128,26 @@ def set_event_starting_soon(event_id, db_url):
                 else:
                     print("Could not find any admin user, test will fail")
                     return False
-        
+
         # Always use UTC timezone for consistency with the application
         one_hour_from_now = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+
         print(f"Debug - Setting event to start at: {one_hour_from_now.isoformat()}")
 
         # First check if the event exists
         with engine.connect() as connection:
             # Enable PostgreSQL datetime debugging
             connection.execute(text("SET TIME ZONE 'UTC';"))
-            
+
             check_sql = text("SELECT id, starts_at FROM events WHERE id = :event_id")
             result = connection.execute(check_sql, {"event_id": event_id})
             row = result.fetchone()
             event_exists = row is not None
-            
+
             if event_exists:
                 current_starts_at = row[1]
                 print(f"Debug - Current event start time: {current_starts_at}")
-        
+
         actual_event_id = event_id
         if not event_exists:
             print(f"Event {event_id} not found. Creating it...")
@@ -153,8 +155,9 @@ def set_event_starting_soon(event_id, db_url):
             with engine.connect() as connection:
                 # Ensure the connection is in UTC
                 connection.execute(text("SET TIME ZONE 'UTC';"))
-                
-                create_sql = text("""
+
+                create_sql = text(
+                    """
                 INSERT INTO events 
                 (name, description, creator_id, starts_at, address, max_capacity, 
                 price_per_person, status, created_at, updated_at, registration_deadline)
@@ -162,8 +165,9 @@ def set_event_starting_soon(event_id, db_url):
                 (:name, :description, :creator_id, :starts_at, :address, :max_capacity, 
                 :price_per_person, :status, :created_at, :updated_at, :registration_deadline)
                 RETURNING id, starts_at
-                """)
-                
+                """
+                )
+
                 now = datetime.now(timezone.utc)
                 result = connection.execute(
                     create_sql,
@@ -178,17 +182,21 @@ def set_event_starting_soon(event_id, db_url):
                         "status": "Registration Open",
                         "created_at": now,
                         "updated_at": now,
-                        "registration_deadline": one_hour_from_now
-                    }
+                        "registration_deadline": one_hour_from_now,
+                    },
                 )
                 connection.commit()
                 new_row = result.fetchone()
                 actual_event_id = new_row[0]
                 new_starts_at = new_row[1]
-                print(f"Created new event with ID: {actual_event_id}, starts_at: {new_starts_at}")
-                
+                print(
+                    f"Created new event with ID: {actual_event_id}, starts_at: {new_starts_at}"
+                )
+
                 # Verify the timezone was preserved
-                verify_sql = text("SELECT starts_at AT TIME ZONE 'UTC' FROM events WHERE id = :event_id")
+                verify_sql = text(
+                    "SELECT starts_at AT TIME ZONE 'UTC' FROM events WHERE id = :event_id"
+                )
                 result = connection.execute(verify_sql, {"event_id": actual_event_id})
                 verified_time = result.fetchone()[0]
                 print(f"Verified starts_at in UTC: {verified_time}")
@@ -208,7 +216,7 @@ def set_event_starting_soon(event_id, db_url):
             with engine.connect() as connection:
                 # Ensure the connection is in UTC
                 connection.execute(text("SET TIME ZONE 'UTC';"))
-                
+
                 result = connection.execute(
                     sql,
                     {
@@ -224,25 +232,25 @@ def set_event_starting_soon(event_id, db_url):
             print(
                 f"Event {event_id} starts_at set to {updated_starts_at} (1 hour from now)"
             )
-            
+
             # Double-check that the update worked by querying the database again
             with engine.connect() as connection:
                 verify_sql = text("SELECT starts_at FROM events WHERE id = :event_id")
                 result = connection.execute(verify_sql, {"event_id": event_id})
                 verified_time = result.fetchone()[0]
                 print(f"Verified starts_at after update: {verified_time}")
-                
+
                 # Calculate the time difference for debugging
                 now = datetime.now(timezone.utc)
                 time_diff = (verified_time - now).total_seconds() / 3600
                 print(f"Time until event starts: {time_diff} hours")
-                
+
                 # This should be approximately 1 hour
                 if 0.9 <= time_diff <= 1.1:
                     print("✅ Time difference is correctly set to approximately 1 hour")
                 else:
                     print("⚠️ WARNING: Time difference is not approximately 1 hour!")
-                
+
             return actual_event_id
     except Exception as e:
         print(f"Error updating event start time in database: {e}")
@@ -254,7 +262,7 @@ def verify_test_data(event_id, speed_date_id, db_url):
     if not db_url:
         print("Error: DATABASE_URL not found in .env file.")
         return False
-    
+
     try:
         engine = create_engine(db_url)
         with engine.connect() as connection:
@@ -262,49 +270,66 @@ def verify_test_data(event_id, speed_date_id, db_url):
             event_query = text("SELECT id, status FROM events WHERE id = :event_id")
             event_result = connection.execute(event_query, {"event_id": event_id})
             event = event_result.fetchone()
-            
+
             if not event:
-                print(f"Event with ID {event_id} does not exist in database. Test will fail.")
+                print(
+                    f"Event with ID {event_id} does not exist in database. Test will fail."
+                )
                 return False
-            
+
             print(f"Event {event_id} exists with status: {event[1]}")
-            
+
             # Check speed date record exists
-            speed_date_query = text("SELECT id, male_id, female_id FROM events_speed_dates WHERE id = :speed_date_id AND event_id = :event_id")
+            speed_date_query = text(
+                "SELECT id, male_id, female_id FROM events_speed_dates WHERE id = :speed_date_id AND event_id = :event_id"
+            )
             speed_date_result = connection.execute(
-                speed_date_query, 
-                {"speed_date_id": speed_date_id, "event_id": event_id}
+                speed_date_query, {"speed_date_id": speed_date_id, "event_id": event_id}
             )
             speed_date = speed_date_result.fetchone()
-            
+
             if not speed_date:
-                print(f"Speed date record with ID {speed_date_id} for event {event_id} does not exist. Test will fail.")
-                
+                print(
+                    f"Speed date record with ID {speed_date_id} for event {event_id} does not exist. Test will fail."
+                )
+
                 # Check any speed date records for this event
-                check_query = text("SELECT COUNT(*) FROM events_speed_dates WHERE event_id = :event_id")
+                check_query = text(
+                    "SELECT COUNT(*) FROM events_speed_dates WHERE event_id = :event_id"
+                )
                 check_result = connection.execute(check_query, {"event_id": event_id})
                 count = check_result.fetchone()[0]
-                
+
                 if count == 0:
                     print(f"There are NO speed date records for event {event_id}.")
                 else:
                     print(f"There are {count} speed date records for event {event_id}.")
-                    
+
                     # Get first available speed date record
                     if count > 0:
-                        first_record_query = text("SELECT id, male_id, female_id FROM events_speed_dates WHERE event_id = :event_id LIMIT 1")
-                        first_record_result = connection.execute(first_record_query, {"event_id": event_id})
+                        first_record_query = text(
+                            "SELECT id, male_id, female_id FROM events_speed_dates WHERE event_id = :event_id LIMIT 1"
+                        )
+                        first_record_result = connection.execute(
+                            first_record_query, {"event_id": event_id}
+                        )
                         first_record = first_record_result.fetchone()
-                        
+
                         if first_record:
-                            print(f"First available speed date record: ID={first_record[0]}, male_id={first_record[1]}, female_id={first_record[2]}")
-                            print(f"Consider updating TEST_SPEED_DATE_ID to {first_record[0]} in the script.")
-                
+                            print(
+                                f"First available speed date record: ID={first_record[0]}, male_id={first_record[1]}, female_id={first_record[2]}"
+                            )
+                            print(
+                                f"Consider updating TEST_SPEED_DATE_ID to {first_record[0]} in the script."
+                            )
+
                 return False
-            
-            print(f"Speed date record {speed_date_id} exists for event {event_id} with male_id={speed_date[1]}, female_id={speed_date[2]}")
+
+            print(
+                f"Speed date record {speed_date_id} exists for event {event_id} with male_id={speed_date[1]}, female_id={speed_date[2]}"
+            )
             return True
-            
+
     except Exception as e:
         print(f"Error verifying test data: {e}")
         return False
@@ -316,12 +341,13 @@ def create_test_event_if_needed(db_url, user_id):
     if not db_url:
         print("Error: DATABASE_URL not found in .env file.")
         return None, None
-    
+
     try:
         engine = create_engine(db_url)
         with engine.connect() as connection:
             # First check if we already have an event with speed dates
-            check_query = text("""
+            check_query = text(
+                """
                 SELECT e.id, (
                     SELECT MIN(sd.id) 
                     FROM events_speed_dates sd 
@@ -334,20 +360,23 @@ def create_test_event_if_needed(db_url, user_id):
                     WHERE sd.event_id = e.id
                 ) > 0
                 LIMIT 1
-            """)
+            """
+            )
             result = connection.execute(check_query)
             row = result.fetchone()
-            
+
             if row and row[0] and row[1]:
                 print(f"Found existing event {row[0]} with speed date {row[1]}")
                 return row[0], row[1]
-            
+
             # No suitable event found, create one
             print("No suitable event found with speed dates. Creating test event...")
-            
+
             # Get an admin user if needed
             if not user_id:
-                admin_query = text("SELECT id FROM users WHERE role_id = 3 LIMIT 1")  # Admin role_id = 3
+                admin_query = text(
+                    "SELECT id FROM users WHERE role_id = 3 LIMIT 1"
+                )  # Admin role_id = 3
                 admin_result = connection.execute(admin_query)
                 admin = admin_result.fetchone()
                 if admin:
@@ -355,10 +384,11 @@ def create_test_event_if_needed(db_url, user_id):
                 else:
                     print("Could not find an admin user to create the event")
                     return None, None
-            
+
             # Create event
             now = datetime.now(timezone.utc)
-            create_event_sql = text("""
+            create_event_sql = text(
+                """
                 INSERT INTO events 
                 (name, description, creator_id, starts_at, address, max_capacity, 
                 price_per_person, status, created_at, updated_at, registration_deadline)
@@ -366,8 +396,9 @@ def create_test_event_if_needed(db_url, user_id):
                 (:name, :description, :creator_id, :starts_at, :address, :max_capacity, 
                 :price_per_person, :status, :created_at, :updated_at, :registration_deadline)
                 RETURNING id
-            """)
-            
+            """
+            )
+
             result = connection.execute(
                 create_event_sql,
                 {
@@ -381,85 +412,89 @@ def create_test_event_if_needed(db_url, user_id):
                     "status": "Completed",
                     "created_at": now - timedelta(days=2),
                     "updated_at": now - timedelta(days=1),
-                    "registration_deadline": now - timedelta(days=2)
-                }
+                    "registration_deadline": now - timedelta(days=2),
+                },
             )
             event_id = result.fetchone()[0]
             print(f"Created test event with ID: {event_id}")
-            
+
             # Get male and female user IDs
             male_query = text("SELECT id FROM users WHERE gender = 'Male' LIMIT 1")
             female_query = text("SELECT id FROM users WHERE gender = 'Female' LIMIT 1")
-            
+
             male_result = connection.execute(male_query)
             female_result = connection.execute(female_query)
-            
+
             male_user = male_result.fetchone()
             female_user = female_result.fetchone()
-            
+
             if not male_user or not female_user:
                 print("Could not find both male and female users for speed date record")
                 connection.rollback()
                 return None, None
-            
+
             male_id = male_user[0]
             female_id = female_user[0]
-            
+
             # Create a speed date record
-            create_speed_date_sql = text("""
+            create_speed_date_sql = text(
+                """
                 INSERT INTO events_speed_dates
                 (event_id, male_id, female_id, table_number, round_number)
                 VALUES
                 (:event_id, :male_id, :female_id, 1, 1)
                 RETURNING id
-            """)
-            
+            """
+            )
+
             result = connection.execute(
                 create_speed_date_sql,
-                {
-                    "event_id": event_id,
-                    "male_id": male_id,
-                    "female_id": female_id
-                }
+                {"event_id": event_id, "male_id": male_id, "female_id": female_id},
             )
             speed_date_id = result.fetchone()[0]
             print(f"Created speed date record with ID: {speed_date_id}")
-            
+
             # Create attendee records for the test users
-            create_attendee_sql = text("""
+            create_attendee_sql = text(
+                """
                 INSERT INTO events_attendees
                 (event_id, user_id, status, pin)
                 VALUES
                 (:event_id, :user_id, 'Checked In', '1234')
                 ON CONFLICT (event_id, user_id) DO NOTHING
-            """)
-            
-            connection.execute(create_attendee_sql, {"event_id": event_id, "user_id": male_id})
-            connection.execute(create_attendee_sql, {"event_id": event_id, "user_id": female_id})
-            
+            """
+            )
+
+            connection.execute(
+                create_attendee_sql, {"event_id": event_id, "user_id": male_id}
+            )
+            connection.execute(
+                create_attendee_sql, {"event_id": event_id, "user_id": female_id}
+            )
+
             connection.commit()
             return event_id, speed_date_id
-            
+
     except Exception as e:
         print(f"Error creating test event: {e}")
         return None, None
-        
+
 
 def test_late_submission():
     print("--- Test: Submitting selections > 24 hours after event completion ---")
 
     user_id = get_user_id_from_email(TEST_USER_EMAIL, DATABASE_URL)
-    
+
     print(f"\nFinding or creating test event...")
     event_id, speed_date_id = create_test_event_if_needed(DATABASE_URL, user_id)
     if not event_id or not speed_date_id:
         print("Test aborted: Could not find or create test event.")
         return False
-        
+
     global TEST_EVENT_ID, TEST_SPEED_DATE_ID
     TEST_EVENT_ID = event_id
     TEST_SPEED_DATE_ID = speed_date_id
-    
+
     print(f"\nVerifying test data...")
     if not verify_test_data(TEST_EVENT_ID, TEST_SPEED_DATE_ID, DATABASE_URL):
         print("Test aborted: Test data verification failed.")
@@ -516,7 +551,11 @@ def test_late_submission():
                 print(response.text)
                 if "Traceback" in response.text:
                     print("\nServer traceback detected. Error details:")
-                    error_lines = [line for line in response.text.split('\n') if "Error" in line or "Exception" in line]
+                    error_lines = [
+                        line
+                        for line in response.text.split("\n")
+                        if "Error" in line or "Exception" in line
+                    ]
                     for line in error_lines:
                         print(line.strip())
                 return False
@@ -553,7 +592,7 @@ def test_registration_too_close_to_event():
     if not actual_event_id:
         print("Test aborted: Could not update event start time in database.")
         return False
-    
+
     print(f"Using actual event ID: {actual_event_id} for registration test")
 
     register_url = f"{API_BASE_URL}/events/{actual_event_id}/register"
@@ -573,10 +612,9 @@ def test_registration_too_close_to_event():
 
             if response.status_code == 400:
                 print("\nSUCCESS: Received expected status code 400.")
-                if (
-                    "error" in response_data
-                    and ("Registration is closed" in response_data["error"] 
-                         and "within 2 hours" in response_data["error"])
+                if "error" in response_data and (
+                    "Registration is closed" in response_data["error"]
+                    and "within 2 hours" in response_data["error"]
                 ):
                     print(
                         "SUCCESS: Received expected error message indicating registration is closed."
@@ -592,9 +630,15 @@ def test_registration_too_close_to_event():
                     f"FAILURE: Expected status code 400, but received {response.status_code}."
                 )
                 if response.status_code == 500:
-                    print("WARNING: Server error occurred. Check the server logs for details.")
-                    if hasattr(response, 'text'):
-                        error_text = response.text[:500] + "..." if len(response.text) > 500 else response.text
+                    print(
+                        "WARNING: Server error occurred. Check the server logs for details."
+                    )
+                    if hasattr(response, "text"):
+                        error_text = (
+                            response.text[:500] + "..."
+                            if len(response.text) > 500
+                            else response.text
+                        )
                         print(f"Error response: {error_text}")
                 return False
 
@@ -612,13 +656,15 @@ def test_registration_too_close_to_event():
 
 
 if __name__ == "__main__":
-    #late_submission_result = test_late_submission()
+    # late_submission_result = test_late_submission()
     late_registration_result = test_registration_too_close_to_event()
-    
+
     print("\n--- Test Summary ---")
-    #print(f"Late submission test: {'PASSED' if late_submission_result else 'FAILED'}")
-    print(f"Late registration test: {'PASSED' if late_registration_result else 'FAILED'}")
-    
+    # print(f"Late submission test: {'PASSED' if late_submission_result else 'FAILED'}")
+    print(
+        f"Late registration test: {'PASSED' if late_registration_result else 'FAILED'}"
+    )
+
     # Exit with appropriate code
-    #exit(0 if late_submission_result and late_registration_result else 1)
+    # exit(0 if late_submission_result and late_registration_result else 1)
     exit(0 if late_registration_result else 1)
