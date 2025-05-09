@@ -101,61 +101,128 @@ class SpeedDateMatcher:
 
         num_males = len(males)
         num_females = len(females)
-        num_active_tables = min(num_males, num_females, num_tables)
-
+        num_active_tables = min(num_tables, (min(num_males, num_females)))
         current_app.logger.info(
             f"Event {event_id}: Generating schedule for {num_males} males, {num_females} females, {num_rounds} rounds, {num_active_tables} active tables."
         )
 
-        # Assign fixed tables to males (up to num_active_tables)
-        male_table_assignments: Dict[int, int] = {}
-        males_at_tables = males[:num_active_tables]
-        for i, male in enumerate(males_at_tables):
-            male_table_assignments[male.id] = i + 1  # Tables are 1-indexed
-            current_app.logger.debug(f"  Assigning Male {male.id} to Table {i + 1}")
+        male_ids = [m.id for m in males]
+        male_participation_count = {male_id: 0 for male_id in male_ids}
 
-        # --- Scheduling Logic ---
+        male_table_assignments = {}
+        active_males_by_round = {}
+
+        for i, male in enumerate(males):
+            table_num = (i % num_active_tables) + 1  # Tables are 1-indexed
+            male_table_assignments[male.id] = table_num
+            current_app.logger.debug(
+                f"Assigning Male {male.id} to fixed Table {table_num}"
+            )
+
         event_speed_dates: List[EventSpeedDate] = []
         met_pairs: Set[Tuple[int, int]] = set()
         female_ids = [f.id for f in females]
+
+        if num_males > num_active_tables:
+            male_groups = []
+            remaining_males = males.copy()
+
+            while remaining_males:
+                group = remaining_males[:num_active_tables]
+                male_groups.append(group)
+                remaining_males = remaining_males[num_active_tables:]
+
+            if len(male_groups) > 1:
+                current_app.logger.info(
+                    f"Event {event_id}: Created {len(male_groups)} groups of males for switching"
+                )
+        else:
+            male_groups = [males]
 
         for round_number in range(1, num_rounds + 1):
             current_app.logger.info(
                 f"Event {event_id}: --- Generating Round {round_number} --- "
             )
-            # Females available at the start of this round
+
+            if len(male_groups) > 1:
+                group_index = (round_number - 1) % len(male_groups)
+                active_group = male_groups[group_index]
+
+                if round_number > len(male_groups):
+                    high_participation_threshold = (
+                        max(male_participation_count.values()) - 1
+                    )
+                    males_with_high_participation = [
+                        m
+                        for m in active_group
+                        if male_participation_count[m.id]
+                        >= high_participation_threshold
+                    ]
+
+                    if males_with_high_participation:
+                        other_males = [m for m in males if m not in active_group]
+                        potential_replacements = sorted(
+                            other_males, key=lambda m: male_participation_count[m.id]
+                        )
+
+                        for i, high_male in enumerate(males_with_high_participation):
+                            if i < len(potential_replacements):
+                                replacement = potential_replacements[i]
+                                if (
+                                    male_participation_count[replacement.id]
+                                    < male_participation_count[high_male.id] - 1
+                                ):
+                                    current_app.logger.debug(
+                                        f"Round {round_number}: Replacing Male {high_male.id} (participation={male_participation_count[high_male.id]}) "
+                                        f"with Male {replacement.id} (participation={male_participation_count[replacement.id]})"
+                                    )
+                                    active_group.remove(high_male)
+                                    active_group.append(replacement)
+
+                active_males_in_round = active_group
+            else:
+                active_males_in_round = males
+
+            active_males_by_round[round_number] = [m.id for m in active_males_in_round]
+            current_app.logger.info(
+                f"Round {round_number}: Active males: {[m.id for m in active_males_in_round]}"
+            )
+
+            round_table_assignments = {
+                male.id: male_table_assignments[male.id]
+                for male in active_males_in_round
+            }
+
             females_available_this_round = list(female_ids)
-            # Simple cyclic rotation for females for this round
-            shift = (round_number - 1) % num_females
+
+            female_shift = 0
+            if num_females > 0:
+                female_shift = (round_number - 1) % num_females
+
             rotated_available_females = (
-                females_available_this_round[shift:]
-                + females_available_this_round[:shift]
+                females_available_this_round[female_shift:]
+                + females_available_this_round[:female_shift]
             )
 
             females_seated_this_round = set()
             tables_filled_this_round = 0
 
-            # Iterate through the males who have fixed tables
-            for male_id, table_number in male_table_assignments.items():
+            for male_id, table_number in round_table_assignments.items():
                 found_partner_for_male = False
-                # Try to find a suitable partner from the rotated list
-                for female_id in rotated_available_females:
-                    # Check if female is already seated this round or if pair already met
-                    if (
-                        female_id in females_seated_this_round
-                        or (male_id, female_id) in met_pairs
-                    ):
-                        continue
 
-                    male_user = id_to_user[male_id]
-                    female_user = id_to_user[female_id]
-                    if female_user not in all_compatible_dates.get(male_id, []):
-                        current_app.logger.debug(
-                            f" Round {round_number}, T{table_number}: Male {male_id} skipping Female {female_id} due to age incompatibility."
-                        )
-                        continue
+                compatible_females = [
+                    f.id
+                    for f in all_compatible_dates.get(male_id, [])
+                    if f.id in rotated_available_females
+                    and f.id not in females_seated_this_round
+                    and (male_id, f.id) not in met_pairs
+                ]
 
-                    # --- Assign Date ---
+                if compatible_females:
+                    female_id = compatible_females[
+                        0
+                    ]  # Take the first compatible female
+
                     current_app.logger.debug(
                         f" Round {round_number}: Assigning Male {male_id} (Table {table_number}) with Female {female_id}"
                     )
@@ -172,7 +239,9 @@ class SpeedDateMatcher:
                     rotated_available_females.remove(female_id)
                     found_partner_for_male = True
                     tables_filled_this_round += 1
-                    break
+
+                    # Increment the male's participation count
+                    male_participation_count[male_id] += 1
 
                 if not found_partner_for_male:
                     current_app.logger.warning(
@@ -182,6 +251,16 @@ class SpeedDateMatcher:
             current_app.logger.info(
                 f"Event {event_id}: Finished Round {round_number}, {tables_filled_this_round}/{num_active_tables} tables filled."
             )
+
+        # Log participation counts
+        participation_info = sorted(
+            [(male_id, count) for male_id, count in male_participation_count.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        current_app.logger.info(f"Event {event_id}: Male participation counts:")
+        for male_id, count in participation_info:
+            current_app.logger.info(f"  Male {male_id}: {count} dates")
 
         current_app.logger.info(
             f"Event {event_id}: Schedule generation complete. Total dates created: {len(event_speed_dates)}"

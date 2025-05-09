@@ -6,7 +6,6 @@ class EventStatus(Enum):
     IN_PROGRESS = "In Progress"
     COMPLETED = "Completed"
     CANCELLED = "Cancelled"
-    PAUSED = "Paused"
 
 
 class Gender(Enum):

@@ -147,6 +147,33 @@ def start_event(event_id):
         current_user = User.query.get(current_user_id)
         event = Event.query.get_or_404(event_id)
 
+        # Parse request data for tables and rounds
+        data = request.get_json() or {}
+        num_tables = data.get("num_tables", 15)  # Default to 15 if not provided
+        num_rounds = data.get("num_rounds", 15)  # Default to 15 if not provided
+
+        # Validate input values
+        try:
+            num_tables = int(num_tables)
+            num_rounds = int(num_rounds)
+
+            if num_tables < 1 or num_rounds < 1:
+                return (
+                    jsonify(
+                        {
+                            "error": "Number of tables and rounds must be positive integers"
+                        }
+                    ),
+                    400,
+                )
+        except (ValueError, TypeError):
+            return (
+                jsonify(
+                    {"error": "Invalid input for tables or rounds, must be integers"}
+                ),
+                400,
+            )
+
         # Check permissions
         if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
             return jsonify({"error": "Unauthorized"}), 403
@@ -205,7 +232,9 @@ def start_event(event_id):
                     f"Failed to automatically start timer for event {event_id}: {timer_result['error']}"
                 )
                 # Proceed with event start, but log timer error
-                schedule_success = SpeedDateService.generate_schedule(event_id)
+                schedule_success = SpeedDateService.generate_schedule(
+                    event_id, num_tables, num_rounds
+                )
                 return (
                     jsonify(
                         {
@@ -219,7 +248,9 @@ def start_event(event_id):
                     f"Successfully started timer for Round 1 for event {event_id}."
                 )
                 # --- Generate Schedule (only if timer started successfully?) ---
-                schedule_success = SpeedDateService.generate_schedule(event_id)
+                schedule_success = SpeedDateService.generate_schedule(
+                    event_id, num_tables, num_rounds
+                )
         except Exception as timer_start_error:
             current_app.logger.error(
                 f"Exception occurred while trying to start timer for event {event_id}: {str(timer_start_error)}",
@@ -343,57 +374,6 @@ def update_event_status(event_id):
         current_app.logger.info(
             f"Successfully updated event {event_id} status from '{original_status}' to '{status}'"
         )
-
-        # --- Add Timer Coordination ---
-        try:
-            # If changing TO Paused FROM In Progress, pause the timer
-            if (
-                status == EventStatus.PAUSED.value
-                and original_status == EventStatus.IN_PROGRESS.value
-            ):
-                current_app.logger.info(
-                    f"Event {event_id} status changed to PAUSED, attempting to pause timer..."
-                )
-                pause_result = EventTimerService.pause_round(
-                    event_id
-                )  # No time_remaining needed here
-                if "error" in pause_result:
-                    current_app.logger.warning(
-                        f"Failed to automatically pause timer for event {event_id} after status change: {pause_result['error']}"
-                    )
-                    # Don't fail the whole request, just log the warning
-                else:
-                    current_app.logger.info(
-                        f"Successfully paused timer for event {event_id} due to status change."
-                    )
-
-            # If changing FROM Paused TO In Progress, resume the timer
-            elif (
-                status == EventStatus.IN_PROGRESS.value
-                and original_status == EventStatus.PAUSED.value
-            ):
-                current_app.logger.info(
-                    f"Event {event_id} status changed from PAUSED to IN_PROGRESS, attempting to resume timer..."
-                )
-                resume_result = EventTimerService.resume_round(event_id)
-                if "error" in resume_result:
-                    current_app.logger.warning(
-                        f"Failed to automatically resume timer for event {event_id} after status change: {resume_result['error']}"
-                    )
-                    # Don't fail the whole request, just log the warning
-                else:
-                    current_app.logger.info(
-                        f"Successfully resumed timer for event {event_id} due to status change."
-                    )
-        except Exception as timer_coord_error:
-            current_app.logger.error(
-                f"Error during timer coordination for event {event_id} after status change: {str(timer_coord_error)}",
-                exc_info=True,
-            )
-            # Log error but don't fail the main status update
-
-        # --- End Timer Coordination ---
-
         return jsonify({"message": "Event status updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
@@ -659,11 +639,10 @@ def get_schedule(event_id):
         # Check if event exists
         event = Event.query.get_or_404(event_id)
 
-        # Check if event is in progress, paused, or completed
+        # Check if event is in progress or completed
         if event.status not in [
             EventStatus.IN_PROGRESS.value,
             EventStatus.COMPLETED.value,
-            EventStatus.PAUSED.value,
         ]:
             return (
                 jsonify({"error": "Schedule not available. Event has not started"}),
@@ -723,11 +702,10 @@ def get_all_schedules(event_id):
         )
         # -------------------
 
-        # Check if event is in progress, paused, or completed
+        # Check if event is in progress, or completed
         if event.status not in [
             EventStatus.IN_PROGRESS.value,
             EventStatus.COMPLETED.value,
-            EventStatus.PAUSED.value,
         ]:
             current_app.logger.warning(
                 f"Event {event_id} status '{event.status}' is not valid for viewing schedules. Returning 400."
@@ -1184,7 +1162,7 @@ def submit_speed_date_selections(event_id):
         event = Event.query.get_or_404(event_id)
         now_utc = datetime.now(timezone.utc)
 
-        allowed_statuses = [EventStatus.IN_PROGRESS.value, EventStatus.PAUSED.value]
+        allowed_statuses = [EventStatus.IN_PROGRESS.value]
         is_allowed_status = event.status in allowed_statuses
 
         is_recently_completed = False

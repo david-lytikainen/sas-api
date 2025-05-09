@@ -12,7 +12,7 @@ import json
 class SpeedDateService:
     @staticmethod
     def generate_schedule(
-        event_id: int, num_tables: int = 10, num_rounds: int = 10
+        event_id: int, num_tables: int = 15, num_rounds: int = 15
     ) -> bool:
         """
         Generate speed dating schedule for an event
@@ -55,7 +55,9 @@ class SpeedDateService:
             )
 
             # Calculate appropriate number of tables and rounds based on attendance
-            calculated_num_tables = min(num_tables, min(len(males), len(females)))
+            calculated_num_tables = min(
+                num_tables, len(males)
+            )  # Allow tables for all males
             calculated_num_rounds = min(num_rounds, max(len(males), len(females)))
 
             # Find compatible dates and generate schedule
