@@ -122,6 +122,19 @@ def create_event():
 def register_for_event(event_id):
     current_user_id = get_jwt_identity()
     response = EventService.register_for_event(event_id, current_user_id)
+    
+    # Check if the response contains an error
+    if isinstance(response, dict) and "error" in response:
+        # Check for specific error messages that should return 400
+        if "Registration is closed for this event" in response["error"]:
+            return jsonify(response), 400
+        elif "Event is not open for registration" in response["error"]:
+            return jsonify(response), 400
+        elif "You are already registered for this event" in response["error"]:
+            return jsonify(response), 400
+        elif "Event with ID" in response["error"] and "not found" in response["error"]:
+            return jsonify(response), 404
+    
     return jsonify(response)
 
 
