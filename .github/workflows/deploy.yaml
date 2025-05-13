@@ -22,10 +22,10 @@ jobs:
             git pull origin ${{ github.ref_name }}
             source /home/ubuntu/SAS/sas-api/venv/bin/activate
             pip install -r requirements.txt
-            black . 
+            black . || true
             if git diff --name-only HEAD~1 HEAD | grep -qE '^(app|scripts|tests)'; then
               git add .
               git commit -m "Updating code formatting for deployment"
               git push origin ${{ github.ref_name }}
-            fi
+            fi           
             sudo systemctl restart SAS.service 
