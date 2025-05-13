@@ -80,10 +80,10 @@ class EventService:
         time_until_event = starts_at - now
         hours_until_event = time_until_event.total_seconds() / 3600
 
-        if hours_until_event <= 2:
-            return {
-                "error": "Registration is closed for this event (starts within 2 hours)"
-            }
+        # if hours_until_event <= 2:
+        #     return {
+        #         "error": "Registration is closed for this event (starts within 2 hours)"
+        #     }
 
         # Check if user is already registered for this event
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
