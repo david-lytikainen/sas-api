@@ -9,7 +9,6 @@ from app.models.enums import EventStatus, RegistrationStatus
 from app.models import Event
 from typing import List
 
-
 class EventService:
     @staticmethod
     def get_events() -> List[Event]:
@@ -49,14 +48,14 @@ class EventService:
                 "creator_id": user_id,
                 "starts_at": datetime.fromisoformat(
                     data["starts_at"].replace("Z", "+00:00")
-                ),
+                ).astimezone(timezone.utc),
                 "address": data["address"],
                 "max_capacity": data["max_capacity"],
                 "status": EventStatus.REGISTRATION_OPEN.value,
                 "price_per_person": Decimal(str(data["price_per_person"])),
                 "registration_deadline": datetime.fromisoformat(
                     data["starts_at"].replace("Z", "+00:00")
-                ),
+                ).astimezone(timezone.utc),
             }
         )
 
@@ -109,3 +108,76 @@ class EventService:
     @staticmethod
     def cancel_registration(event_id: int, user_id: int):
         EventAttendeeRepository.delete(event_id, user_id)
+
+    @staticmethod
+    def update_event(event_id: int, data: dict, user_id: int):
+        event = EventRepository.get_event(event_id)
+        if not event:
+            return None, {"error": f"Event with ID {event_id} not found"}, 404
+
+        user = UserRepository.find_by_id(user_id)
+        if not user:
+            return None, {"error": "User not found"}, 404 # Should not happen if JWT is valid
+
+        # Admin can edit any event, Organizer can only edit their own
+        if not (user.role_id == 3 or (user.role_id == 2 and str(event.creator_id) == str(user_id))):
+            raise UnauthorizedError("You are not authorized to update this event.")
+
+        # Fields that can be updated by admin/organizer
+        allowed_fields = ['name', 'description', 'starts_at', 'address', 'max_capacity', 'price_per_person', 'status', 'registration_deadline']
+        update_data = {}
+
+        for field in allowed_fields:
+            if field in data:
+                value = data[field]
+                if field == 'starts_at' or field == 'registration_deadline':
+                    try:
+                        update_data[field] = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+                    except ValueError:
+                        return None, {"error": f"Invalid date format for {field}"}, 400
+                elif field == 'price_per_person':
+                    try:
+                        update_data[field] = Decimal(str(value))
+                    except ValueError:
+                        return None, {"error": f"Invalid format for {field}"}, 400
+                elif field == 'max_capacity':
+                    try:
+                        update_data[field] = int(value)
+                    except ValueError:
+                         return None, {"error": f"Invalid format for {field}, must be an integer"}, 400
+                elif field == 'status':
+                    if value not in [s.value for s in EventStatus]:
+                        return None, {"error": f"Invalid status value: {value}"}, 400
+                    update_data[field] = value
+                else:
+                    update_data[field] = value
+        
+        if not update_data:
+            return event, {"message": "No valid fields provided for update"}, 200 # Or 400 if no data is bad
+
+        updated_event = EventRepository.update_event(event, update_data)
+        return updated_event, {"message": "Event updated successfully"}, 200
+
+    @staticmethod
+    def delete_event(event_id: int, user_id: int):
+        event = EventRepository.get_event(event_id)
+        if not event:
+            return {"error": f"Event with ID {event_id} not found"}, 404
+
+        user = UserRepository.find_by_id(user_id)
+        if not user:
+             return {"error": "User not found"}, 404 # Should not happen
+
+        # Admin can delete any event, Organizer can only delete their own
+        if not (user.role_id == 3 or (user.role_id == 2 and str(event.creator_id) == str(user_id))):
+            raise UnauthorizedError("You are not authorized to delete this event.")
+
+        if event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value] and user.role_id != 3:
+            return {"error": f"Event is {event.status} and cannot be deleted by an organizer."}, 400
+
+        try:
+            EventAttendeeRepository.delete_by_event_id(event_id) # Delete attendees first
+            EventRepository.delete_event(event)
+            return {"message": "Event deleted successfully"}, 200
+        except Exception as e:
+            return {"error": f"An error occurred while deleting the event: {str(e)}"}, 500

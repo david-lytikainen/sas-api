@@ -17,3 +17,16 @@ class EventRepository:
         db.session.add(event)
         db.session.commit()
         return event
+
+    @staticmethod
+    def update_event(event: Event, attrs: dict):
+        for key, value in attrs.items():
+            if hasattr(event, key):
+                setattr(event, key, value)
+        db.session.commit()
+        return event
+
+    @staticmethod
+    def delete_event(event: Event):
+        db.session.delete(event)
+        db.session.commit()
