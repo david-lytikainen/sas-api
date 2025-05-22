@@ -49,4 +49,4 @@ class EventAttendeeRepository:
         except Exception as e:
             db.session.rollback()
             # Log error e, for example: current_app.logger.error(f"Error deleting attendees for event {event_id}: {str(e)}")
-            raise e # Re-raise the exception to be handled by the service/route
+            raise e  # Re-raise the exception to be handled by the service/route

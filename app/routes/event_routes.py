@@ -123,25 +123,39 @@ def create_event():
 def update_event_details_route(event_id):
     if request.method == "OPTIONS":
         return "", 204
-        
+
     current_user_id = get_jwt_identity()
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body must be JSON"}), 400
 
     try:
-        updated_event, message, status_code = EventService.update_event(event_id, data, current_user_id)
+        updated_event, message, status_code = EventService.update_event(
+            event_id, data, current_user_id
+        )
         if updated_event:
-            return jsonify({"message": message["message"], "event": updated_event.to_dict()}), status_code
+            return (
+                jsonify(
+                    {"message": message["message"], "event": updated_event.to_dict()}
+                ),
+                status_code,
+            )
         else:
-            return jsonify(message), status_code # Error message from service
+            return jsonify(message), status_code  # Error message from service
     except UnauthorizedError as e:
         return jsonify({"error": str(e)}), 403
-    except MissingFieldsError as e: # Should not be hit if service handles this, but good practice
-        return jsonify({"error": "Missing required fields", "missing_fields": e.fields}), 400
+    except (
+        MissingFieldsError
+    ) as e:  # Should not be hit if service handles this, but good practice
+        return (
+            jsonify({"error": "Missing required fields", "missing_fields": e.fields}),
+            400,
+        )
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error updating event {event_id}: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error updating event {event_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Failed to update event"}), 500
 
 
@@ -1503,11 +1517,15 @@ def delete_event_route(event_id):
     current_user_id = get_jwt_identity()
 
     try:
-        response_message, status_code = EventService.delete_event(event_id, current_user_id)
+        response_message, status_code = EventService.delete_event(
+            event_id, current_user_id
+        )
         return jsonify(response_message), status_code
     except UnauthorizedError as e:
         return jsonify({"error": str(e)}), 403
     except Exception as e:
         # db.session.rollback() # Rollback is handled in repository or should be if critical
-        current_app.logger.error(f"Error deleting event {event_id}: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error deleting event {event_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Failed to delete event"}), 500
