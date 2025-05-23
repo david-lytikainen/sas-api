@@ -1,7 +1,5 @@
-from datetime import datetime
 from app.extensions import db
-from .enums import EventStatus
-from decimal import Decimal
+from .enums import RegistrationStatus
 
 
 class Event(db.Model):
@@ -31,6 +29,17 @@ class Event(db.Model):
     )
 
     def to_dict(self):
+        from .event_attendee import EventAttendee
+
+        registered_attendee_count = (
+            EventAttendee.query.filter(EventAttendee.event_id == self.id)
+            .filter(
+                EventAttendee.status.in_(
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                )
+            )
+            .count()
+        )
         return {
             "id": self.id,
             "name": self.name,
@@ -48,4 +57,5 @@ class Event(db.Model):
                 if self.registration_deadline
                 else None
             ),
+            "registered_attendee_count": registered_attendee_count,
         }
