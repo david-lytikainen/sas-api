@@ -1,7 +1,7 @@
 from typing import List
 from app.extensions import db
 from app.models import EventAttendee, User
-from app.models.enums import RegistrationStatus
+from app.models.enums import RegistrationStatus, Gender
 
 
 class EventAttendeeRepository:
@@ -31,6 +31,20 @@ class EventAttendeeRepository:
             EventAttendee.query.filter(EventAttendee.event_id == event_id)
             .filter(EventAttendee.status.in_(statuses))
             .count()
+        )
+    
+    @staticmethod
+    def count_by_event_and_status_and_gender(
+        event_id: int, statuses: List[RegistrationStatus], gender: Gender
+    ) -> int:
+        return (
+            db.session.query(EventAttendee)
+            .join(User, EventAttendee.user_id == User.id)
+            .filter(
+                EventAttendee.event_id == event_id,
+                EventAttendee.status.in_(statuses),
+                User.gender == gender
+            ).count()
         )
 
     @staticmethod
