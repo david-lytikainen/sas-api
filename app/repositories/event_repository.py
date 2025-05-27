@@ -8,7 +8,7 @@ class EventRepository:
         return Event.query
 
     @staticmethod
-    def get_event(event_id: int):
+    def get_event(event_id: int) -> Event:
         return Event.query.filter_by(id=event_id).first()
 
     @staticmethod

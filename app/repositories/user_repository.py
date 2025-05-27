@@ -14,5 +14,5 @@ class UserRepository:
         return User.query.filter_by(email=email).first()
 
     @staticmethod
-    def find_by_id(user_id: int):
+    def find_by_id(user_id: int) -> User:
         return User.query.filter_by(id=user_id).first()

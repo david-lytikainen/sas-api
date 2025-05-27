@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import math
 import random
 from app.repositories.event_repository import EventRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.event_attendee_repository import EventAttendeeRepository
 from app.repositories.event_waitlist_repository import EventWaitlistRepository
 from app.exceptions import UnauthorizedError, MissingFieldsError
-from app.models.enums import EventStatus, RegistrationStatus
+from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models import Event
 from typing import List
 
@@ -97,15 +98,28 @@ class EventService:
                     "waitlist_available": True 
                 }
 
-        now = datetime.now(timezone.utc)
+        # check if event is full for this gender
+        user = UserRepository.find_by_id(user_id)
+        if not user:
+            return {"error": f"User with ID {user_id} not found"}
+        same_gender_count = EventAttendeeRepository.count_by_event_and_status_and_gender(
+            event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN], user.gender
+        )
+        if same_gender_count >= math.floor(event.max_capacity * .6):
+            if join_waitlist:
+                return EventService.join_event_waitlist(event_id, user_id)
+            else:
+                return {
+                    "error": "Event is full for this gender, cannot register",
+                    "waitlist_available": True
+                }
 
-        starts_at = event.starts_at
-        if not starts_at.tzinfo:
-            starts_at = starts_at.replace(tzinfo=timezone.utc)
-
-        time_until_event = starts_at - now
-        hours_until_event = time_until_event.total_seconds() / 3600
-
+        # now = datetime.now(timezone.utc)
+        # starts_at = event.starts_at
+        # if not starts_at.tzinfo:
+        #     starts_at = starts_at.replace(tzinfo=timezone.utc)
+        # time_until_event = starts_at - now
+        # hours_until_event = time_until_event.total_seconds() / 3600
         # if hours_until_event <= 2:
         #     return {
         #         "error": "Registration is closed for this event (starts within 2 hours)"
@@ -146,15 +160,6 @@ class EventService:
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
         if on_waitlist:
             return {"error": "You are already on the waitlist for this event"}
-        
-        # Check if event is actually full (safety check, though register_for_event should handle this)
-        attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
-            event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
-        )
-        if attendee_count < event.max_capacity:
-             # This case should ideally not be hit if join_waitlist is only true when full
-            return {"error": "Event is not full, please register directly instead of joining waitlist."}
-
         try:
             EventWaitlistRepository.add_to_waitlist(event_id, user_id)
             return {"message": "Successfully joined the waitlist for the event"}
@@ -190,8 +195,7 @@ class EventService:
         """Checks if a spot has opened up and registers the first person from the waitlist."""
         event = EventRepository.get_event(event_id)
         if not event or event.status != EventStatus.REGISTRATION_OPEN.value:
-            return # Only process for open events
-
+            return # Only process for open events        
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
@@ -199,6 +203,18 @@ class EventService:
         if attendee_count < event.max_capacity:
             first_waitlisted = EventWaitlistRepository.get_first_in_waitlist(event_id)
             if first_waitlisted:
+                first_waitlisted_user = UserRepository.find_by_id(first_waitlisted.user_id)
+                if not first_waitlisted_user:
+                    return {"error": f"User with ID {first_waitlisted.user_id} not found"}
+                same_gender_count = EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN], first_waitlisted_user.gender
+                )
+
+                # get the first waitlisted opposite gender if we have hit capacity
+                if same_gender_count >= math.floor(event.max_capacity * .6):
+                    other_gender = Gender.MALE if first_waitlisted_user.gender == Gender.FEMALE else Gender.FEMALE
+                    first_waitlisted = EventWaitlistRepository.get_first_in_waitlist_by_gender(event_id, other_gender)
+
                 # Attempt to register this user
                 pin = "".join(random.choices("0123456789", k=4))
                 try:
