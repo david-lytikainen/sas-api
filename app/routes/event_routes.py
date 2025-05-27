@@ -175,7 +175,9 @@ def register_for_event(event_id):
             return jsonify(response), 400
         elif "You are already registered for this event" in error_message:
             return jsonify(response), 400
-        elif "Event is full, cannot register" in error_message:  # Specific check for full event
+        elif (
+            "Event is full, cannot register" in error_message
+        ):  # Specific check for full event
             return jsonify(response), 409  # Return 409 Conflict
         elif "Event with ID" in error_message and "not found" in error_message:
             return jsonify(response), 404
