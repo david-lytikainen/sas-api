@@ -8,3 +8,4 @@ from app.models.church import Church
 from app.models.denomination import Denomination
 from app.models.role import Role
 from app.models.enums import Gender, EventStatus, RegistrationStatus, UserRole
+from app.models.event_waitlist import EventWaitlist

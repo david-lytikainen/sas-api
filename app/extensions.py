@@ -8,5 +8,5 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 db = SQLAlchemy()
-migrate = Migrate()
+migrate = Migrate(compare_type=True, render_as_batch=True)
 jwt = JWTManager()

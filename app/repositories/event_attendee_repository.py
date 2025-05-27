@@ -61,3 +61,27 @@ class EventAttendeeRepository:
             db.session.rollback()
             # Log error e, for example: current_app.logger.error(f"Error deleting attendees for event {event_id}: {str(e)}")
             raise e  # Re-raise the exception to be handled by the service/route
+
+    @staticmethod
+    def update_registration_status(registration: EventAttendee, new_status: RegistrationStatus, check_in_date=None):
+        """Updates the status and optionally the check_in_date of a registration."""
+        if not isinstance(registration, EventAttendee):
+            # Or raise an error, or log
+            return None 
+            
+        registration.status = new_status
+        if check_in_date and new_status == RegistrationStatus.CHECKED_IN:
+            registration.check_in_date = check_in_date
+        elif new_status != RegistrationStatus.CHECKED_IN:
+            # If status changes from CHECKED_IN to something else, nullify check_in_date
+            registration.check_in_date = None 
+            
+        db.session.add(registration) # Add to session to track changes
+        try:
+            db.session.commit()
+            return registration
+        except Exception as e:
+            db.session.rollback()
+            # Log error e
+            # current_app.logger.error(f"Error updating registration status for attendee {registration.id}: {str(e)}")
+            return None
