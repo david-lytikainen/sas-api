@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
+from app.models.event_waitlist import EventWaitlist
 from app.models.event_speed_date import EventSpeedDate
 from app.models.enums import EventStatus, RegistrationStatus, UserRole, Gender
 from app.extensions import db
@@ -32,10 +33,10 @@ def get_events():
     # Get all events
     events_data = EventService.get_events_for_user(user_id)
 
-    # Get user's registrations
+    # Get user's actual registrations
     user_registrations = EventAttendee.query.filter_by(user_id=user_id).all()
-    registrations_data = [
-        {
+    registrations_map = {
+        reg.event_id: {
             "event_id": reg.event_id,
             "status": reg.status.value,
             "pin": reg.pin,
@@ -47,10 +48,26 @@ def get_events():
             ),
         }
         for reg in user_registrations
-    ]
+    }
 
-    # Return both events and registrations
-    return jsonify({"events": events_data, "registrations": registrations_data})
+    # Get user's waitlist entries
+    user_waitlist_entries = EventWaitlist.query.filter_by(user_id=user_id).all()
+    for wl_entry in user_waitlist_entries:
+        if wl_entry.event_id not in registrations_map:
+            registrations_map[wl_entry.event_id] = {
+                "event_id": wl_entry.event_id,
+                "status": RegistrationStatus.WAITLISTED.value,
+                "pin": None,
+                "registration_date": (
+                    wl_entry.waitlisted_at.isoformat() if wl_entry.waitlisted_at else None
+                ),
+                "check_in_date": None,
+            }
+    
+    final_registrations_data = list(registrations_map.values())
+
+    # Return both events and comprehensive registrations data
+    return jsonify({"events": events_data, "registrations": final_registrations_data})
 
 
 @event_bp.route("/events/<int:event_id>", methods=["GET", "OPTIONS"])
@@ -163,28 +180,33 @@ def update_event_details_route(event_id):
 @jwt_required()
 def register_for_event(event_id):
     current_user_id = get_jwt_identity()
-    response = EventService.register_for_event(event_id, current_user_id)
+    data = request.get_json() or {}
+    join_waitlist_param = data.get("join_waitlist", False)
+
+    response = EventService.register_for_event(event_id, current_user_id, join_waitlist=join_waitlist_param)
 
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
         error_message = response["error"]
-        # Check for specific error messages that should return 400
-        if "Registration is closed for this event" in error_message:
+        # Check for specific error messages that should return appropriate HTTP status codes
+        if "Event is full, cannot register" in error_message:
+            # For this specific error, also include waitlist_available in the response if present
+            return jsonify(response), 409  # Conflict, event is full
+        elif "Registration is closed for this event" in error_message:
             return jsonify(response), 400
         elif "Event is not open for registration" in error_message:
             return jsonify(response), 400
         elif "You are already registered for this event" in error_message:
             return jsonify(response), 400
-        elif (
-            "Event is full, cannot register" in error_message
-        ):  # Specific check for full event
-            return jsonify(response), 409  # Return 409 Conflict
+        elif "You are already on the waitlist for this event" in error_message:
+            return jsonify(response), 400 # Or perhaps 409 if preferred for already on waitlist
         elif "Event with ID" in error_message and "not found" in error_message:
             return jsonify(response), 404
-        # Fallback for other errors from the service that might not have a specific HTTP status yet
+        # Fallback for other errors from the service
         return jsonify(response), 400
-
-    return jsonify(response)
+    
+    # Handle success (directly registered or successfully joined waitlist)
+    return jsonify(response), 200 # Or 201 if a resource was created (like waitlist entry)
 
 
 @event_bp.route(
@@ -304,7 +326,7 @@ def start_event(event_id):
                         }
                     ),
                     500,
-                )  # Return 500 if timer fails?
+                ) # Return 500 if timer fails?
             else:
                 current_app.logger.info(
                     f"Successfully started timer for Round 1 for event {event_id}."

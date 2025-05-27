@@ -1,1 +1,5 @@
 from .user_repository import UserRepository
+from .event_repository import EventRepository
+from .event_attendee_repository import EventAttendeeRepository
+from .event_waitlist_repository import EventWaitlistRepository
+from .event_timer_repository import EventTimerRepository

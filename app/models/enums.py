@@ -17,6 +17,7 @@ class RegistrationStatus(Enum):
     REGISTERED = "Registered"
     CHECKED_IN = "Checked In"
     CANCELLED = "Cancelled"
+    WAITLISTED = "Waitlisted"
 
 
 class UserRole(Enum):
