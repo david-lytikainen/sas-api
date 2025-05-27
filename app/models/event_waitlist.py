@@ -1,6 +1,7 @@
 from app.extensions import db
 from sqlalchemy.sql import func
 
+
 class EventWaitlist(db.Model):
     __tablename__ = "event_waitlists"
 
@@ -12,11 +13,17 @@ class EventWaitlist(db.Model):
     )
 
     # Relationships
-    event = db.relationship("Event", backref=db.backref("waitlist_entries", lazy="dynamic"))
-    user = db.relationship("User", backref=db.backref("waitlist_entries", lazy="dynamic"))
+    event = db.relationship(
+        "Event", backref=db.backref("waitlist_entries", lazy="dynamic")
+    )
+    user = db.relationship(
+        "User", backref=db.backref("waitlist_entries", lazy="dynamic")
+    )
 
     # Unique constraint to ensure a user can only be on the waitlist for an event once
-    __table_args__ = (db.UniqueConstraint("event_id", "user_id", name="uq_event_user_waitlist"),)
+    __table_args__ = (
+        db.UniqueConstraint("event_id", "user_id", name="uq_event_user_waitlist"),
+    )
 
     def __repr__(self):
-        return f"<EventWaitlist event_id={self.event_id} user_id={self.user_id}>" 
+        return f"<EventWaitlist event_id={self.event_id} user_id={self.user_id}>"

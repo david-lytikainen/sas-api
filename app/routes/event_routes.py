@@ -59,11 +59,13 @@ def get_events():
                 "status": RegistrationStatus.WAITLISTED.value,
                 "pin": None,
                 "registration_date": (
-                    wl_entry.waitlisted_at.isoformat() if wl_entry.waitlisted_at else None
+                    wl_entry.waitlisted_at.isoformat()
+                    if wl_entry.waitlisted_at
+                    else None
                 ),
                 "check_in_date": None,
             }
-    
+
     final_registrations_data = list(registrations_map.values())
 
     # Return both events and comprehensive registrations data
@@ -183,7 +185,9 @@ def register_for_event(event_id):
     data = request.get_json() or {}
     join_waitlist_param = data.get("join_waitlist", False)
 
-    response = EventService.register_for_event(event_id, current_user_id, join_waitlist=join_waitlist_param)
+    response = EventService.register_for_event(
+        event_id, current_user_id, join_waitlist=join_waitlist_param
+    )
 
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
@@ -199,14 +203,20 @@ def register_for_event(event_id):
         elif "You are already registered for this event" in error_message:
             return jsonify(response), 400
         elif "You are already on the waitlist for this event" in error_message:
-            return jsonify(response), 400 # Or perhaps 409 if preferred for already on waitlist
+            return (
+                jsonify(response),
+                400,
+            )  # Or perhaps 409 if preferred for already on waitlist
         elif "Event with ID" in error_message and "not found" in error_message:
             return jsonify(response), 404
         # Fallback for other errors from the service
         return jsonify(response), 400
-    
+
     # Handle success (directly registered or successfully joined waitlist)
-    return jsonify(response), 200 # Or 201 if a resource was created (like waitlist entry)
+    return (
+        jsonify(response),
+        200,
+    )  # Or 201 if a resource was created (like waitlist entry)
 
 
 @event_bp.route(
@@ -326,7 +336,7 @@ def start_event(event_id):
                         }
                     ),
                     500,
-                ) # Return 500 if timer fails?
+                )  # Return 500 if timer fails?
             else:
                 current_app.logger.info(
                     f"Successfully started timer for Round 1 for event {event_id}."

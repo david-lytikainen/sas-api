@@ -32,7 +32,7 @@ class EventAttendeeRepository:
             .filter(EventAttendee.status.in_(statuses))
             .count()
         )
-    
+
     @staticmethod
     def count_by_event_and_status_and_gender(
         event_id: int, statuses: List[RegistrationStatus], gender: Gender
@@ -43,8 +43,9 @@ class EventAttendeeRepository:
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(statuses),
-                User.gender == gender
-            ).count()
+                User.gender == gender,
+            )
+            .count()
         )
 
     @staticmethod
@@ -77,20 +78,22 @@ class EventAttendeeRepository:
             raise e  # Re-raise the exception to be handled by the service/route
 
     @staticmethod
-    def update_registration_status(registration: EventAttendee, new_status: RegistrationStatus, check_in_date=None):
+    def update_registration_status(
+        registration: EventAttendee, new_status: RegistrationStatus, check_in_date=None
+    ):
         """Updates the status and optionally the check_in_date of a registration."""
         if not isinstance(registration, EventAttendee):
             # Or raise an error, or log
-            return None 
-            
+            return None
+
         registration.status = new_status
         if check_in_date and new_status == RegistrationStatus.CHECKED_IN:
             registration.check_in_date = check_in_date
         elif new_status != RegistrationStatus.CHECKED_IN:
             # If status changes from CHECKED_IN to something else, nullify check_in_date
-            registration.check_in_date = None 
-            
-        db.session.add(registration) # Add to session to track changes
+            registration.check_in_date = None
+
+        db.session.add(registration)  # Add to session to track changes
         try:
             db.session.commit()
             return registration

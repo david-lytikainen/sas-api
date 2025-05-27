@@ -79,7 +79,7 @@ class EventService:
         )
         if existing_registration:
             return {"error": "You are already registered for this event"}
-        
+
         # Check if user is already on the waitlist
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
         if on_waitlist:
@@ -95,23 +95,27 @@ class EventService:
             else:
                 return {
                     "error": "Event is full, cannot register",
-                    "waitlist_available": True 
+                    "waitlist_available": True,
                 }
 
         # check if event is full for this gender
         user = UserRepository.find_by_id(user_id)
         if not user:
             return {"error": f"User with ID {user_id} not found"}
-        same_gender_count = EventAttendeeRepository.count_by_event_and_status_and_gender(
-            event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN], user.gender
+        same_gender_count = (
+            EventAttendeeRepository.count_by_event_and_status_and_gender(
+                event_id,
+                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                user.gender,
+            )
         )
-        if same_gender_count >= math.floor(event.max_capacity * .6):
+        if same_gender_count >= math.floor(event.max_capacity * 0.6):
             if join_waitlist:
                 return EventService.join_event_waitlist(event_id, user_id)
             else:
                 return {
                     "error": "Event is full for this gender, cannot register",
-                    "waitlist_available": True
+                    "waitlist_available": True,
                 }
 
         # now = datetime.now(timezone.utc)
@@ -147,14 +151,18 @@ class EventService:
             return {"error": f"Event with ID {event_id} not found"}
 
         if event.status != EventStatus.REGISTRATION_OPEN.value:
-            return {"error": "Event is not open for registration for waitlisting"} # Or a different message
+            return {
+                "error": "Event is not open for registration for waitlisting"
+            }  # Or a different message
 
         # Double check if user is already registered (should have been caught earlier)
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
             event_id, user_id
         )
         if existing_registration:
-            return {"error": "You are already registered for this event, cannot join waitlist"}
+            return {
+                "error": "You are already registered for this event, cannot join waitlist"
+            }
 
         # Check if user is already on the waitlist
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
@@ -165,7 +173,7 @@ class EventService:
             return {"message": "Successfully joined the waitlist for the event"}
         except Exception as e:
             # Log the exception e
-            return {"error": f"Could not join waitlist: {str(e)}"} 
+            return {"error": f"Could not join waitlist: {str(e)}"}
 
     @staticmethod
     def cancel_registration(event_id: int, user_id: int):
@@ -176,7 +184,9 @@ class EventService:
             if removed:
                 return {"message": "Successfully removed from waitlist"}
             else:
-                return {"error": "Failed to remove from waitlist"} # Should not happen if find_by_event_and_user returned entry
+                return {
+                    "error": "Failed to remove from waitlist"
+                }  # Should not happen if find_by_event_and_user returned entry
 
         # If not on waitlist, proceed to cancel registration as attendee
         registration = EventAttendeeRepository.find_by_event_and_user(event_id, user_id)
@@ -184,10 +194,10 @@ class EventService:
             return {"error": "You are not registered for this event or on its waitlist"}
 
         EventAttendeeRepository.delete(event_id, user_id)
-        
+
         # Attempt to register the first person from the waitlist if a spot opened up
         EventService.process_waitlist_for_event(event_id)
-        
+
         return {"message": "Successfully cancelled registration"}
 
     @staticmethod
@@ -195,7 +205,7 @@ class EventService:
         """Checks if a spot has opened up and registers the first person from the waitlist."""
         event = EventRepository.get_event(event_id)
         if not event or event.status != EventStatus.REGISTRATION_OPEN.value:
-            return # Only process for open events        
+            return  # Only process for open events
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
@@ -203,17 +213,33 @@ class EventService:
         if attendee_count < event.max_capacity:
             first_waitlisted = EventWaitlistRepository.get_first_in_waitlist(event_id)
             if first_waitlisted:
-                first_waitlisted_user = UserRepository.find_by_id(first_waitlisted.user_id)
+                first_waitlisted_user = UserRepository.find_by_id(
+                    first_waitlisted.user_id
+                )
                 if not first_waitlisted_user:
-                    return {"error": f"User with ID {first_waitlisted.user_id} not found"}
-                same_gender_count = EventAttendeeRepository.count_by_event_and_status_and_gender(
-                    event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN], first_waitlisted_user.gender
+                    return {
+                        "error": f"User with ID {first_waitlisted.user_id} not found"
+                    }
+                same_gender_count = (
+                    EventAttendeeRepository.count_by_event_and_status_and_gender(
+                        event_id,
+                        [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                        first_waitlisted_user.gender,
+                    )
                 )
 
                 # get the first waitlisted opposite gender if we have hit capacity
-                if same_gender_count >= math.floor(event.max_capacity * .6):
-                    other_gender = Gender.MALE if first_waitlisted_user.gender == Gender.FEMALE else Gender.FEMALE
-                    first_waitlisted = EventWaitlistRepository.get_first_in_waitlist_by_gender(event_id, other_gender)
+                if same_gender_count >= math.floor(event.max_capacity * 0.6):
+                    other_gender = (
+                        Gender.MALE
+                        if first_waitlisted_user.gender == Gender.FEMALE
+                        else Gender.FEMALE
+                    )
+                    first_waitlisted = (
+                        EventWaitlistRepository.get_first_in_waitlist_by_gender(
+                            event_id, other_gender
+                        )
+                    )
 
                 # Attempt to register this user
                 pin = "".join(random.choices("0123456789", k=4))
@@ -226,12 +252,14 @@ class EventService:
                             "pin": pin,
                         }
                     )
-                    EventWaitlistRepository.remove_from_waitlist(event_id, first_waitlisted.user_id)
+                    EventWaitlistRepository.remove_from_waitlist(
+                        event_id, first_waitlisted.user_id
+                    )
                     # Optionally: Send a notification to the user they have been registered.
                     # current_app.logger.info(f"User {first_waitlisted.user_id} registered from waitlist for event {event_id}")
                 except Exception as e:
                     # current_app.logger.error(f"Error registering user {first_waitlisted.user_id} from waitlist for event {event_id}: {str(e)}")
-                    pass # Keep them on waitlist if registration fails for some reason
+                    pass  # Keep them on waitlist if registration fails for some reason
 
     @staticmethod
     def check_in(event_id: int, user_id: int, pin: str):
@@ -243,8 +271,13 @@ class EventService:
             return {"error": "Cannot check in to a completed event"}, 400
 
         # Users should ideally only be able to check in if event is Registration Open or In Progress
-        if event.status not in [EventStatus.REGISTRATION_OPEN.value, EventStatus.IN_PROGRESS.value]:
-            return {"error": f"Event is not open for check-in (status: {event.status})"}, 400
+        if event.status not in [
+            EventStatus.REGISTRATION_OPEN.value,
+            EventStatus.IN_PROGRESS.value,
+        ]:
+            return {
+                "error": f"Event is not open for check-in (status: {event.status})"
+            }, 400
 
         registration = EventAttendeeRepository.find_by_event_and_user(event_id, user_id)
         if not registration:
@@ -252,17 +285,17 @@ class EventService:
 
         if registration.status == RegistrationStatus.CHECKED_IN:
             return {"error": "You are already checked in for this event"}, 400
-        
+
         if registration.status != RegistrationStatus.REGISTERED:
-            return {"error": f"Cannot check in. Your registration status is: {registration.status.name if registration.status else 'Unknown'}"}, 400
+            return {
+                "error": f"Cannot check in. Your registration status is: {registration.status.name if registration.status else 'Unknown'}"
+            }, 400
 
         if registration.pin != pin:
-            return {"error": "Invalid PIN"}, 401 # Unauthorized or 400 Bad Request
+            return {"error": "Invalid PIN"}, 401  # Unauthorized or 400 Bad Request
 
         updated_registration = EventAttendeeRepository.update_registration_status(
-            registration,
-            RegistrationStatus.CHECKED_IN,
-            datetime.now(timezone.utc)
+            registration, RegistrationStatus.CHECKED_IN, datetime.now(timezone.utc)
         )
         if updated_registration:
             return {"message": "Successfully checked in"}, 200

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import os
 from dotenv import load_dotenv
-from app import create_app, db  
+from app import create_app, db
 import app.models.event_waitlist
+
 # Load environment variables
 load_dotenv()
 
@@ -13,7 +14,9 @@ app = create_app()
 with app.app_context():
     app.logger.info("Attempting to create database tables...")
     # Log known tables by SQLAlchemy metadata
-    app.logger.info(f"Tables known to SQLAlchemy metadata before create_all: {list(db.metadata.tables.keys())}")
+    app.logger.info(
+        f"Tables known to SQLAlchemy metadata before create_all: {list(db.metadata.tables.keys())}"
+    )
     db.create_all()
     app.logger.info("Database tables check/creation complete.")
 
