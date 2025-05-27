@@ -167,15 +167,20 @@ def register_for_event(event_id):
 
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
+        error_message = response["error"]
         # Check for specific error messages that should return 400
-        if "Registration is closed for this event" in response["error"]:
+        if "Registration is closed for this event" in error_message:
             return jsonify(response), 400
-        elif "Event is not open for registration" in response["error"]:
+        elif "Event is not open for registration" in error_message:
             return jsonify(response), 400
-        elif "You are already registered for this event" in response["error"]:
+        elif "You are already registered for this event" in error_message:
             return jsonify(response), 400
-        elif "Event with ID" in response["error"] and "not found" in response["error"]:
+        elif "Event is full, cannot register" in error_message:  # Specific check for full event
+            return jsonify(response), 409  # Return 409 Conflict
+        elif "Event with ID" in error_message and "not found" in error_message:
             return jsonify(response), 404
+        # Fallback for other errors from the service that might not have a specific HTTP status yet
+        return jsonify(response), 400
 
     return jsonify(response)
 

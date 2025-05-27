@@ -23,6 +23,17 @@ class EventAttendeeRepository:
         return EventAttendee.query.filter_by(event_id=event_id, user_id=user_id).first()
 
     @staticmethod
+    def count_by_event_id_and_status(
+        event_id: int, statuses: List[RegistrationStatus]
+    ) -> int:
+        """Count attendees for an event with specific registration statuses."""
+        return (
+            EventAttendee.query.filter(EventAttendee.event_id == event_id)
+            .filter(EventAttendee.status.in_(statuses))
+            .count()
+        )
+
+    @staticmethod
     def register_for_event(attrs):
         event_attendee = EventAttendee(**attrs)
         db.session.add(event_attendee)

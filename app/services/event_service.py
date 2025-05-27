@@ -71,6 +71,13 @@ class EventService:
         if event.status != EventStatus.REGISTRATION_OPEN.value:
             return {"error": "Event is not open for registration"}
 
+        # Check if the event is full
+        attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
+            event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+        )
+        if attendee_count >= event.max_capacity:
+            return {"error": "Event is full, cannot register"}
+
         now = datetime.now(timezone.utc)
 
         starts_at = event.starts_at
