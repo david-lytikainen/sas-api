@@ -40,7 +40,7 @@ def create_app():
     limiter = Limiter(
         get_remote_address,
         app=app,
-        default_limits=["50 per minute, 2500 per hour, 10000 per day"],
+        default_limits=["60 per minute, 2500 per hour, 10000 per day"],
         storage_uri=os.getenv("LIMITER_DATABASE_URL", "memory://"),
         strategy="fixed-window",
     )
