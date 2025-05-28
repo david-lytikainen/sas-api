@@ -1,6 +1,6 @@
 from app.extensions import db
 from app.models.event_timer import EventTimer
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 from flask import current_app  # Import current_app for logging
 
@@ -111,7 +111,17 @@ class EventTimerRepository:
                     f"Found paused timer {timer.id}. Setting is_paused=False, updating round_start_time."
                 )
                 timer.is_paused = False
-                timer.round_start_time = datetime.now(pytz.UTC)
+                
+                # Calculate the start time based on pause_time_remaining
+                if timer.pause_time_remaining is not None:
+                    now = datetime.now(pytz.UTC)
+                    elapsed_seconds = timer.round_duration - timer.pause_time_remaining
+                    # Set round_start_time to be elapsed_seconds before now
+                    timer.round_start_time = now - timedelta(seconds=elapsed_seconds)
+                else:
+                    # Fallback to current time if pause_time_remaining is None
+                    timer.round_start_time = datetime.now(pytz.UTC)
+                
                 # Keep the pause_time_remaining to know how much time is left
                 current_app.logger.info("Committing resume changes to DB...")
                 db.session.commit()
@@ -127,8 +137,6 @@ class EventTimerRepository:
             current_app.logger.warning(
                 f"Timer {timer.id} for event {event_id} found but was not paused."
             )
-            # Return timer anyway, maybe service layer handles this?
-            # Or return None? Let's return None to indicate resume didn't happen as expected.
             return None
         else:
             current_app.logger.warning(
