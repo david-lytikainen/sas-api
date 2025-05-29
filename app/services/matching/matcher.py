@@ -37,12 +37,13 @@ class SpeedDateMatcher:
                 match
                 for match in all_opposite_gender
                 if (
-                    attendee.church_id != match.church_id or
-                    attendee.church_id is None or
-                    match.church_id is None
+                    attendee.church_id != match.church_id
+                    or attendee.church_id is None
+                    or match.church_id is None
                 )
                 and (
-                    abs(attendee.calculate_age() - match.calculate_age()) <= initial_age_difference
+                    abs(attendee.calculate_age() - match.calculate_age())
+                    <= initial_age_difference
                 )
             ]
 
@@ -57,12 +58,13 @@ class SpeedDateMatcher:
                     match
                     for match in all_opposite_gender
                     if (
-                        attendee.church_id != match.church_id or
-                        attendee.church_id is None or
-                        match.church_id is None
+                        attendee.church_id != match.church_id
+                        or attendee.church_id is None
+                        or match.church_id is None
                     )
                     and (
-                        abs(attendee.calculate_age() - match.calculate_age()) <= extended_age_difference
+                        abs(attendee.calculate_age() - match.calculate_age())
+                        <= extended_age_difference
                     )
                 ]
 

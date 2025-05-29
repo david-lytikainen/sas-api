@@ -28,7 +28,7 @@ def create_test_churches():
         "Calvary Chapel Delco",
         "Church of the Saviour",
         "Providence",
-        "Church of God"
+        "Church of God",
     ]
     churches = []
     for name in church_names:
@@ -157,17 +157,22 @@ def delete_test_data():
         db.session.rollback()
         print(f"Error deleting test data: {e}")
         raise
-    
+
+
 def have_attendees_match(event: Event):
     """Force all EventSpeedDate records for the event to be mutual matches (male_interested and female_interested True)"""
-    db.session.query(EventSpeedDate).filter(EventSpeedDate.event_id == event.id).update({
-        "male_interested": True,
-        "female_interested": True
-    }, synchronize_session=False)
-    
+    db.session.query(EventSpeedDate).filter(EventSpeedDate.event_id == event.id).update(
+        {"male_interested": True, "female_interested": True}, synchronize_session=False
+    )
+
     print(f"Updated all event speed dates to have matches for event {event.id}")
-    print(db.session.query(EventSpeedDate).filter(EventSpeedDate.event_id == event.id).all())
+    print(
+        db.session.query(EventSpeedDate)
+        .filter(EventSpeedDate.event_id == event.id)
+        .all()
+    )
     db.session.commit()
+
 
 def main():
     with app.app_context():
@@ -177,6 +182,7 @@ def main():
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
         from app.services.speed_date_service import SpeedDateService
+
         SpeedDateService.generate_schedule(test_event.id, num_tables=10, num_rounds=10)
         have_attendees_match(test_event)
         create_admin_user(update=True)

@@ -44,6 +44,7 @@ class UserService:
                     # Create new church if not found
                     church = Church(name=church_name)
                     from app.extensions import db
+
                     db.session.add(church)
                     db.session.commit()
                 church_id = church.id
