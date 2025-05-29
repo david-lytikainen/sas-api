@@ -17,27 +17,48 @@ from datetime import datetime, timedelta
 from random import randrange
 from werkzeug.security import generate_password_hash
 from create_admin import create_admin_user
+from app.models.church import Church
 
 app = create_app()
 
 
-def create_test_users():
-    """Create 12 male and 17 female test users"""
+def create_test_churches():
+    """Create test churches and return a list of their IDs"""
+    church_names = [
+        "Calvary Chapel Delco",
+        "Church of the Saviour",
+        "Providence",
+        "Church of God"
+    ]
+    churches = []
+    for name in church_names:
+        church = Church(name=name)
+        churches.append(church)
+    db.session.add_all(churches)
+    db.session.commit()
+    print(f"Created {len(churches)} test churches")
+    return [church.id for church in churches]
+
+
+def create_test_users(church_ids=None):
+    """Create 12 male and 17 female test users, assigning them to churches if provided"""
     test_users = []
+    if not church_ids:
+        church_ids = [None]  # Default to None if no churches provided
 
     # Create 12 male users
     for i in range(12):
         male_user = User(
             role_id=1,  # Assuming 1 is regular user role
             email=f"male{i+1}@test.com",
-            password=generate_password_hash("test123"),  # You might want to hash this
+            password=generate_password_hash("test123"),
             first_name=f"Male{i+1}",
             last_name=f"Test{i+1}",
             phone=f"+1555000{str(i+1).zfill(4)}",
             gender=Gender.MALE,
             birthday=random_birthday(20, 30),
-            church_id=None,  # Optional
-            denomination_id=None,  # Optional
+            church_id=church_ids[i % len(church_ids)] if church_ids else None,
+            denomination_id=None,
         )
         test_users.append(male_user)
 
@@ -46,18 +67,17 @@ def create_test_users():
         female_user = User(
             role_id=1,  # Assuming 1 is regular user role
             email=f"female{i+1}@test.com",
-            password=generate_password_hash("test123"),  # You might want to hash this
+            password=generate_password_hash("test123"),
             first_name=f"Female{i+1}",
             last_name=f"Test{i+1}",
             phone=f"+1555111{str(i+1).zfill(4)}",
             gender=Gender.FEMALE,
             birthday=random_birthday(20, 30),
-            church_id=None,  # Optional
-            denomination_id=None,  # Optional
+            church_id=church_ids[i % len(church_ids)] if church_ids else None,
+            denomination_id=None,
         )
         test_users.append(female_user)
 
-    # Add all users to database
     db.session.add_all(test_users)
     db.session.commit()
 
@@ -86,7 +106,7 @@ def create_test_event(creator_id):
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
-        status=EventStatus.REGISTRATION_OPEN.value,
+        status=EventStatus.IN_PROGRESS.value,
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
@@ -137,15 +157,29 @@ def delete_test_data():
         db.session.rollback()
         print(f"Error deleting test data: {e}")
         raise
-
+    
+def have_attendees_match(event: Event):
+    """Force all EventSpeedDate records for the event to be mutual matches (male_interested and female_interested True)"""
+    db.session.query(EventSpeedDate).filter(EventSpeedDate.event_id == event.id).update({
+        "male_interested": True,
+        "female_interested": True
+    }, synchronize_session=False)
+    
+    print(f"Updated all event speed dates to have matches for event {event.id}")
+    print(db.session.query(EventSpeedDate).filter(EventSpeedDate.event_id == event.id).all())
+    db.session.commit()
 
 def main():
     with app.app_context():
         delete_test_data()
-        test_users = create_test_users()
+        church_ids = create_test_churches()
+        test_users = create_test_users(church_ids)
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
-        create_admin_user(update=True)  # (update=True)
+        from app.services.speed_date_service import SpeedDateService
+        SpeedDateService.generate_schedule(test_event.id, num_tables=10, num_rounds=10)
+        have_attendees_match(test_event)
+        create_admin_user(update=True)
 
 
 if __name__ == "__main__":

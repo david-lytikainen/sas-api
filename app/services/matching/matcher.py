@@ -33,12 +33,17 @@ class SpeedDateMatcher:
         for attendee in males + females:
             all_opposite_gender = females if attendee.gender == Gender.MALE else males
 
-            # Try with initial age range
             compatible_dates = [
                 match
                 for match in all_opposite_gender
-                if abs(attendee.calculate_age() - match.calculate_age())
-                <= initial_age_difference
+                if (
+                    attendee.church_id != match.church_id or
+                    attendee.church_id is None or
+                    match.church_id is None
+                )
+                and (
+                    abs(attendee.calculate_age() - match.calculate_age()) <= initial_age_difference
+                )
             ]
 
             # If not enough matches, try extended age range
@@ -51,8 +56,14 @@ class SpeedDateMatcher:
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
-                    if abs(attendee.calculate_age() - match.calculate_age())
-                    <= extended_age_difference
+                    if (
+                        attendee.church_id != match.church_id or
+                        attendee.church_id is None or
+                        match.church_id is None
+                    )
+                    and (
+                        abs(attendee.calculate_age() - match.calculate_age()) <= extended_age_difference
+                    )
                 ]
 
             all_compatible_dates[attendee.id] = compatible_dates

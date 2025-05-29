@@ -5,6 +5,7 @@ from flask_jwt_extended import create_access_token
 from app.repositories import UserRepository
 from datetime import timedelta, datetime
 import logging
+from app.models.church import Church
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +35,19 @@ class UserService:
                 logger.warning(f"Invalid gender value: {gender_str}")
                 raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
 
+            # --- Church name to ID mapping ---
+            church_id = None
+            church_name = user_data.get("current_church")
+            if church_name and church_name != "Other":
+                church = Church.query.filter_by(name=church_name).first()
+                if not church:
+                    # Create new church if not found
+                    church = Church(name=church_name)
+                    from app.extensions import db
+                    db.session.add(church)
+                    db.session.commit()
+                church_id = church.id
+
             # Create user object
             user = User(
                 role_id=user_data["role_id"],
@@ -44,7 +58,7 @@ class UserService:
                 phone=user_data["phone"],
                 gender=gender,
                 birthday=datetime.strptime(user_data["birthday"], "%Y-%m-%d").date(),
-                church_id=user_data.get("church_id"),
+                church_id=church_id,
                 denomination_id=user_data.get("denomination_id"),
             )
 
