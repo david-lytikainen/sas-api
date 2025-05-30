@@ -120,6 +120,7 @@ class SpeedDateService:
             user_church = "Other"
             if user.church_id:
                 from app.models.church import Church
+
                 church = Church.query.get(user.church_id)
                 if church:
                     user_church = church.name
@@ -138,6 +139,7 @@ class SpeedDateService:
                     partner_church = "Other"
                     if partner.church_id:
                         from app.models.church import Church
+
                         church = Church.query.get(partner.church_id)
                         if church:
                             partner_church = church.name
