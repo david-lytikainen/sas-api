@@ -116,6 +116,17 @@ class SpeedDateService:
                 )
                 partner_id_field = "male_id"
 
+            # Get user's church name
+            user_church = "Other"
+            if user.church_id:
+                from app.models.church import Church
+                church = Church.query.get(user.church_id)
+                if church:
+                    user_church = church.name
+
+            # Calculate user's age
+            user_age = user.calculate_age()
+
             # Format the schedule with partner details
             schedule = []
             for date in speed_dates:
@@ -123,13 +134,27 @@ class SpeedDateService:
                 partner = User.query.get(partner_id)
 
                 if partner:
+                    # Get partner's church name
+                    partner_church = "Other"
+                    if partner.church_id:
+                        from app.models.church import Church
+                        church = Church.query.get(partner.church_id)
+                        if church:
+                            partner_church = church.name
+
+                    # Calculate partner's age
+                    partner_age = partner.calculate_age()
+
                     schedule.append(
                         {
                             "round": date.round_number,
                             "table": date.table_number,
                             "partner_id": partner_id,
                             "partner_name": f"{partner.first_name} {partner.last_name}",
-                            "partner_age": partner.calculate_age(),
+                            "partner_age": partner_age,
+                            "partner_church": partner_church,
+                            "user_age": user_age,
+                            "user_church": user_church,
                             "event_speed_date_id": date.id,
                         }
                     )
