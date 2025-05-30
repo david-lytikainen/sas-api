@@ -33,7 +33,7 @@ def create_test_churches():
     churches = []
     for name in church_names:
         church = Church(name=name)
-        churches.append(church)
+        churches.append(church) 
     db.session.add_all(churches)
     db.session.commit()
     print(f"Created {len(churches)} test churches")
@@ -106,16 +106,19 @@ def create_test_event(creator_id):
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
         max_capacity=50,  # More than our test users
-        status=EventStatus.IN_PROGRESS.value,
+        status="In Progress",  # Use the string value directly
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
+        num_rounds=10
     )
 
     db.session.add(test_event)
     db.session.commit()
 
-    print(f"Created test event: {test_event.name}")
+    from app.services.event_timer_service import EventTimerService
+    EventTimerService.create_timer(test_event.id)
+
     return test_event
 
 
@@ -151,6 +154,7 @@ def delete_test_data():
         db.session.query(EventAttendee).delete()
         db.session.query(Event).delete()
         db.session.query(User).delete()
+        db.session.query(Church).delete()
         db.session.commit()
         print("All test data deleted successfully")
     except Exception as e:
