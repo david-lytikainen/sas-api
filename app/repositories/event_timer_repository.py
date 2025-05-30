@@ -17,7 +17,10 @@ class EventTimerRepository:
         """Create a new timer for an event"""
         final_round = EventRepository.get_event(event_id).num_rounds
         timer = EventTimer(
-            event_id=event_id, current_round=1, final_round=final_round, round_duration=round_duration
+            event_id=event_id,
+            current_round=1,
+            final_round=final_round,
+            round_duration=round_duration,
         )
         db.session.add(timer)
         db.session.commit()
@@ -46,7 +49,7 @@ class EventTimerRepository:
             timer.pause_time_remaining = None
             db.session.commit()
         return timer
-    
+
     @staticmethod
     def end_round(event_id: int):
         timer = EventTimerRepository.get_timer(event_id)
@@ -78,7 +81,7 @@ class EventTimerRepository:
                 current_app.logger.info(
                     f"Repository: No time_remaining provided for pause (event {event_id}). Calculated: {calculated_remaining}s"
                 )
-                time_remaining = calculated_remaining 
+                time_remaining = calculated_remaining
             else:
                 current_app.logger.warning(
                     f"Repository: Cannot pause timer for event {event_id}. time_remaining not provided and round_start_time is null."
@@ -119,7 +122,7 @@ class EventTimerRepository:
                     f"Found paused timer {timer.id}. Setting is_paused=False, updating round_start_time."
                 )
                 timer.is_paused = False
-                
+
                 # Calculate the start time based on pause_time_remaining
                 if timer.pause_time_remaining is not None:
                     now = datetime.now(pytz.UTC)
@@ -129,7 +132,7 @@ class EventTimerRepository:
                 else:
                     # Fallback to current time if pause_time_remaining is None
                     timer.round_start_time = datetime.now(pytz.UTC)
-                
+
                 # Keep the pause_time_remaining to know how much time is left
                 current_app.logger.info("Committing resume changes to DB...")
                 db.session.commit()
@@ -167,22 +170,24 @@ class EventTimerRepository:
 
     @staticmethod
     def delete_timer(event_id: int) -> bool:
-        """Delete the timer for a specific event
-        """
+        """Delete the timer for a specific event"""
         try:
             timer = EventTimerRepository.get_timer(event_id)
             if timer:
                 db.session.delete(timer)
                 db.session.commit()
-                current_app.logger.info(f"Successfully deleted timer for event {event_id}")
+                current_app.logger.info(
+                    f"Successfully deleted timer for event {event_id}"
+                )
                 return True
             else:
-                current_app.logger.warning(f"No timer found to delete for event {event_id}")
+                current_app.logger.warning(
+                    f"No timer found to delete for event {event_id}"
+                )
                 return False
         except Exception as e:
             db.session.rollback()
             current_app.logger.error(
-                f"Error deleting timer for event {event_id}: {str(e)}",
-                exc_info=True
+                f"Error deleting timer for event {event_id}: {str(e)}", exc_info=True
             )
             return False

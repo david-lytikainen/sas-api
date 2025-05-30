@@ -252,7 +252,9 @@ def start_event(event_id):
             if num_tables < 1 or num_rounds < 1:
                 return (
                     jsonify(
-                        {"error": "Number of tables and rounds must be positive integers"}
+                        {
+                            "error": "Number of tables and rounds must be positive integers"
+                        }
                     ),
                     400,
                 )
@@ -281,20 +283,20 @@ def start_event(event_id):
 
         EventTimerService.delete_timer(event_id)
         EventTimerService.create_timer(event_id)
-        schedule_success = SpeedDateService.generate_schedule(event_id, num_tables, num_rounds)
+        schedule_success = SpeedDateService.generate_schedule(
+            event_id, num_tables, num_rounds
+        )
         if schedule_success:
             return jsonify({"message": "Event schedule generated"})
         else:
-            current_app.logger.warning(
-                f"Event {event_id} schedule generation failed"
-            )
+            current_app.logger.warning(f"Event {event_id} schedule generation failed")
             return jsonify({"message": "Event schedule could not be generated."})
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(
             f"Error starting event {event_id}: {str(e)}", exc_info=True
-        ) 
+        )
         return jsonify({"error": "Failed to start event"}), 500
 
 
@@ -783,7 +785,8 @@ def start_round(event_id):
     except Exception as e:
         print(f"Error starting round for event {event_id}: {str(e)}")
         return jsonify({"error": "Failed to start round"}), 500
-    
+
+
 @event_bp.route("/events/<int:event_id>/timer/end", methods=["POST"])
 @jwt_required()
 def end_round(event_id):
@@ -805,6 +808,7 @@ def end_round(event_id):
         print(f"Error end round for event {event_id}: {str(e)}")
         return jsonify({"error": "Failed to end round"}), 500
 
+
 @event_bp.route("/events/<int:event_id>/timer/pause", methods=["POST"])
 @jwt_required()
 def pause_round(event_id):
@@ -817,7 +821,9 @@ def pause_round(event_id):
             return jsonify({"error": "User not found"}), 403
 
         is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
+            event.creator_id
+        ) == str(current_user_id)
         if not is_admin and not is_event_creator:
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
@@ -840,7 +846,7 @@ def pause_round(event_id):
         )
         result = EventTimerService.pause_round(event_id, time_remaining)
 
-        if (result is None or "error" in result):
+        if result is None or "error" in result:
             current_app.logger.error(
                 f"Error received from EventTimerService.pause_round: {result}"
             )

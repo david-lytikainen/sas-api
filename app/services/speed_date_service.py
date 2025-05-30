@@ -47,7 +47,7 @@ class SpeedDateService:
                     f"Need at least one person of each gender to generate schedule for event {event_id}"
                 )
                 return False
-            
+
             current_app.logger.info(
                 f"Generating schedule for event {event_id} with {len(males)} males and {len(females)} females"
             )

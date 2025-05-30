@@ -20,7 +20,7 @@ class EventTimerService:
             "timer": timer.to_dict(),
             "message": f"Round {timer.current_round} started",
         }
-    
+
     @staticmethod
     def end_round(event_id: int):
         return EventTimerRepository.end_round(event_id)
@@ -135,11 +135,17 @@ class EventTimerService:
         }
 
         now = datetime.now(pytz.UTC)
-        isEnded = ((now - timer.round_start_time).total_seconds() >= timer.round_duration) if timer.round_start_time else False
+        isEnded = (
+            ((now - timer.round_start_time).total_seconds() >= timer.round_duration)
+            if timer.round_start_time
+            else False
+        )
         if timer.is_paused:
             result["status"] = "paused"
             result["time_remaining"] = timer.pause_time_remaining
-        elif timer.current_round >= timer.final_round and not timer.is_paused and isEnded:
+        elif (
+            timer.current_round >= timer.final_round and not timer.is_paused and isEnded
+        ):
             result["status"] = "ended"
         elif timer.round_start_time:
             result["status"] = "active"
@@ -152,11 +158,11 @@ class EventTimerService:
             result["time_remaining"] = 0
 
         return result
-    
+
     @staticmethod
     def delete_timer(event_id: int) -> bool:
         return EventTimerRepository.delete_timer(event_id)
-    
+
     @staticmethod
     def create_timer(event_id: int):
         return EventTimerRepository.create_timer(event_id)
