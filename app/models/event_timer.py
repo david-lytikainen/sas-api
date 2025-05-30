@@ -8,6 +8,7 @@ class EventTimer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey("events.id"), nullable=False)
     current_round = db.Column(db.Integer, nullable=False, default=1)
+    final_round = db.Column(db.Integer, nullable=False, default=1)
     round_duration = db.Column(
         db.Integer, nullable=False, default=180
     )  # Duration in seconds
@@ -37,6 +38,7 @@ class EventTimer(db.Model):
             "id": self.id,
             "event_id": self.event_id,
             "current_round": self.current_round,
+            "final_round": self.final_round,
             "round_duration": self.round_duration,
             "round_start_time": (
                 self.round_start_time.isoformat() if self.round_start_time else None
