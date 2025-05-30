@@ -1,0 +1,5 @@
+ALTER TABLE events 
+ADD COLUMN num_rounds INTEGER NULL;
+
+ALTER TABLE event_timers 
+ADD COLUMN final_round INTEGER NOT NULL DEFAULT 1;

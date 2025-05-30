@@ -39,38 +39,28 @@ class SpeedDateService:
                 )
                 return False
 
-            # Split attendees by gender
             males = [user for user in attendees if user.gender == Gender.MALE]
             females = [user for user in attendees if user.gender == Gender.FEMALE]
 
-            # Make sure we have at least one person of each gender
             if not males or not females:
                 current_app.logger.warning(
                     f"Need at least one person of each gender to generate schedule for event {event_id}"
                 )
                 return False
-
+            
             current_app.logger.info(
                 f"Generating schedule for event {event_id} with {len(males)} males and {len(females)} females"
             )
 
-            # Calculate appropriate number of tables and rounds based on attendance
-            calculated_num_tables = min(
-                num_tables, len(males)
-            )  # Allow tables for all males
-            calculated_num_rounds = min(num_rounds, max(len(males), len(females)))
-
-            # Find compatible dates and generate schedule
             compatible_dates, id_to_user = SpeedDateMatcher.find_all_potential_dates(
-                males, females, calculated_num_tables, calculated_num_rounds
+                males, females, num_tables, num_rounds
             )
-
             speed_dates = SpeedDateMatcher.finalize_all_rounds(
                 compatible_dates,
                 id_to_user,
                 event_id,
-                calculated_num_tables,
-                calculated_num_rounds,
+                num_tables,
+                num_rounds,
             )
 
             # Save to database
