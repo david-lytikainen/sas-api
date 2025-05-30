@@ -610,6 +610,33 @@ def update_attendee_details(event_id, attendee_id):
                     jsonify({"error": "Invalid birthday format. Use YYYY-MM-DD"}),
                     400,
                 )
+        if "church" in data and data["church"]:
+            try:
+                church_input = data["church"]
+                church = None
+                
+                # Try to parse as integer first (church ID)
+                try:
+                    church_id = int(church_input)
+                    church = Church.query.get(church_id)
+                except (ValueError, TypeError):
+                    # If it's not an integer, treat it as a church name
+                    church = Church.query.filter_by(name=church_input).first()
+                
+                if church:
+                    user_to_update.church_id = church.id
+                    updated_fields.append("church")
+                else:
+                    # If church not found, create a new one
+                    church = Church(name=church_input)
+                    db.session.add(church)
+                    db.session.commit()
+                    user_to_update.church_id = church.id
+                    updated_fields.append("church")
+
+                    
+            except Exception as e:
+                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
 
         # Update attendee fields
         if "pin" in data and data["pin"]:
@@ -619,11 +646,37 @@ def update_attendee_details(event_id, attendee_id):
         # Save changes if any fields were updated
         if updated_fields:
             db.session.commit()
+            
+            # Refresh the user_to_update object to get the latest church data
+            db.session.refresh(user_to_update)
+            
+            # Get updated attendee data to return to frontend
+            church_name = "Other"
+            if user_to_update.church_id:
+                church = Church.query.get(user_to_update.church_id)
+                if church:
+                    church_name = church.name
+            
+            updated_attendee_data = {
+                "id": user_to_update.id,
+                "name": f"{user_to_update.first_name} {user_to_update.last_name}",
+                "email": user_to_update.email,
+                "first_name": user_to_update.first_name,
+                "last_name": user_to_update.last_name,
+                "birthday": user_to_update.birthday.isoformat() if user_to_update.birthday else None,
+                "age": user_to_update.calculate_age(),
+                "gender": user_to_update.gender.value if user_to_update.gender else None,
+                "phone": user_to_update.phone,
+                "church": church_name,
+                "pin": attendee.pin,
+            }
+            
             return (
                 jsonify(
                     {
                         "message": "Attendee details updated successfully",
                         "updated_fields": updated_fields,
+                        "attendee": updated_attendee_data,
                     }
                 ),
                 200,
