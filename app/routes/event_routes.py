@@ -1405,60 +1405,79 @@ def get_all_matches_for_event(event_id):
         return "", 204
 
     current_user_id = get_jwt_identity()
-    
+
     try:
         event = Event.query.get_or_404(event_id)
-        
+
         current_user = User.query.get(current_user_id)
-        
+
         if not current_user:
             return jsonify({"error": "User not found"}), 403
-        
+
         is_admin = current_user.role_id == UserRole.ADMIN.value
         is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
             event.creator_id
         ) == str(current_user_id)
-        
+
         if not is_admin and not is_event_creator:
             return jsonify({"error": "Unauthorized to view all event matches"}), 403
-        
-        if event.status not in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]:
-            return jsonify({"error": "Matches are only available for events that have started"}), 400
-        
+
+        if event.status not in [
+            EventStatus.IN_PROGRESS.value,
+            EventStatus.COMPLETED.value,
+        ]:
+            return (
+                jsonify(
+                    {"error": "Matches are only available for events that have started"}
+                ),
+                400,
+            )
+
         mutual_matches_query = EventSpeedDate.query.filter(
             EventSpeedDate.event_id == event_id,
             EventSpeedDate.male_interested == True,
             EventSpeedDate.female_interested == True,
         ).all()
-        
+
         matches_details = []
         if mutual_matches_query:
             user_ids = set()
             for record in mutual_matches_query:
                 user_ids.add(record.male_id)
                 user_ids.add(record.female_id)
-            
-            users_dict = {user.id: user for user in User.query.filter(User.id.in_(user_ids)).all()}
-            
+
+            users_dict = {
+                user.id: user for user in User.query.filter(User.id.in_(user_ids)).all()
+            }
+
             for record in mutual_matches_query:
                 male_user = users_dict.get(record.male_id)
                 female_user = users_dict.get(record.female_id)
-                
+
                 if male_user and female_user:
-                    matches_details.append({
-                        "user1_name": f"{male_user.first_name} {male_user.last_name}",
-                        "user1_email": male_user.email,
-                        "user2_name": f"{female_user.first_name} {female_user.last_name}",
-                        "user2_email": female_user.email,
-                    })
-            
-            matches_details.sort(key=lambda x: (x["user1_name"].lower(), x["user2_name"].lower()))
-        
-        current_app.logger.info(f"Admin/organizer {current_user_id} viewed {len(matches_details)} matches for event {event_id}")
+                    matches_details.append(
+                        {
+                            "user1_name": f"{male_user.first_name} {male_user.last_name}",
+                            "user1_email": male_user.email,
+                            "user2_name": f"{female_user.first_name} {female_user.last_name}",
+                            "user2_email": female_user.email,
+                        }
+                    )
+
+            matches_details.sort(
+                key=lambda x: (x["user1_name"].lower(), x["user2_name"].lower())
+            )
+
+        current_app.logger.info(
+            f"Admin/organizer {current_user_id} viewed {len(matches_details)} matches for event {event_id}"
+        )
         return jsonify({"matches": matches_details}), 200
-        
+
     except Exception as e:
-        current_app.logger.error(f"Error retrieving all matches for event {event_id}: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error retrieving all matches for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to retrieve matches"}), 500
 
 

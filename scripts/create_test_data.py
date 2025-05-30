@@ -33,7 +33,7 @@ def create_test_churches():
     churches = []
     for name in church_names:
         church = Church(name=name)
-        churches.append(church) 
+        churches.append(church)
     db.session.add_all(churches)
     db.session.commit()
     print(f"Created {len(churches)} test churches")
@@ -110,13 +110,14 @@ def create_test_event(creator_id):
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
-        num_rounds=10
+        num_rounds=10,
     )
 
     db.session.add(test_event)
     db.session.commit()
 
     from app.services.event_timer_service import EventTimerService
+
     EventTimerService.create_timer(test_event.id)
 
     return test_event
