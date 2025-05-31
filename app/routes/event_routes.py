@@ -213,7 +213,7 @@ def register_for_event(event_id):
     return (
         jsonify(response),
         200,
-    ) 
+    )
 
 
 @event_bp.route(
