@@ -69,23 +69,17 @@ class EventService:
         event = EventRepository.get_event(event_id)
         if not event:
             return {"error": f"Event with ID {event_id} not found"}
-
         if event.status != EventStatus.REGISTRATION_OPEN.value:
             return {"error": "Event is not open for registration"}
-
-        # Check if user is already registered for this event
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
             event_id, user_id
         )
         if existing_registration:
             return {"error": "You are already registered for this event"}
-
-        # Check if user is already on the waitlist
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
         if on_waitlist:
             return {"error": "You are already on the waitlist for this event"}
 
-        # Check if the event is full
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
@@ -94,7 +88,7 @@ class EventService:
                 return EventService.join_event_waitlist(event_id, user_id)
             else:
                 return {
-                    "error": "Event is full, cannot register",
+                    "error": "Event is currently full",
                     "waitlist_available": True,
                 }
 
@@ -114,20 +108,9 @@ class EventService:
                 return EventService.join_event_waitlist(event_id, user_id)
             else:
                 return {
-                    "error": "Event is full for this gender, cannot register",
+                    "error": "Event is currently full for this gender",
                     "waitlist_available": True,
                 }
-
-        # now = datetime.now(timezone.utc)
-        # starts_at = event.starts_at
-        # if not starts_at.tzinfo:
-        #     starts_at = starts_at.replace(tzinfo=timezone.utc)
-        # time_until_event = starts_at - now
-        # hours_until_event = time_until_event.total_seconds() / 3600
-        # if hours_until_event <= 2:
-        #     return {
-        #         "error": "Registration is closed for this event (starts within 2 hours)"
-        #     }
 
         # Generate random 4-digit PIN
         pin = "".join(random.choices("0123456789", k=4))

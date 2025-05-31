@@ -193,10 +193,8 @@ def register_for_event(event_id):
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
         error_message = response["error"]
-        # Check for specific error messages that should return appropriate HTTP status codes
-        if "Event is full, cannot register" in error_message:
-            # For this specific error, also include waitlist_available in the response if present
-            return jsonify(response), 409  # Conflict, event is full
+        if "Event is currently full" in error_message:
+            return jsonify(response), 409
         elif "Registration is closed for this event" in error_message:
             return jsonify(response), 400
         elif "Event is not open for registration" in error_message:
@@ -207,17 +205,15 @@ def register_for_event(event_id):
             return (
                 jsonify(response),
                 400,
-            )  # Or perhaps 409 if preferred for already on waitlist
+            )
         elif "Event with ID" in error_message and "not found" in error_message:
             return jsonify(response), 404
-        # Fallback for other errors from the service
         return jsonify(response), 400
 
-    # Handle success (directly registered or successfully joined waitlist)
     return (
         jsonify(response),
         200,
-    )  # Or 201 if a resource was created (like waitlist entry)
+    ) 
 
 
 @event_bp.route(
