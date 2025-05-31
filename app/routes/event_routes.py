@@ -229,10 +229,10 @@ def cancel_registration(event_id):
     return jsonify(response)
 
 
-@event_bp.route("/events/<int:event_id>/start", methods=["POST"])
+@event_bp.route("/events/<int:event_id>/generate/schedules", methods=["POST"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
-def start_event(event_id):
+def generate_schedules(event_id):
     try:
         current_user_id = get_jwt_identity()
         current_user = User.query.get(current_user_id)
@@ -273,17 +273,18 @@ def start_event(event_id):
                 400,
             )
 
-        event.status = EventStatus.IN_PROGRESS.value
-        event.num_rounds = num_rounds
-        db.session.commit()
-        current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
-
         EventTimerService.delete_timer(event_id)
         EventTimerService.create_timer(event_id)
-        schedule_success = SpeedDateService.generate_schedule(
+        num_rounds_actual, num_tables_actual = SpeedDateService.generate_schedule(
             event_id, num_tables, num_rounds
         )
-        if schedule_success:
+
+        if num_rounds_actual > 0:
+            event.status = EventStatus.IN_PROGRESS.value
+            event.num_rounds = num_rounds_actual
+            event.num_tables = num_tables_actual
+            db.session.commit()
+            current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
             return jsonify({"message": "Event schedule generated"})
         else:
             current_app.logger.warning(f"Event {event_id} schedule generation failed")

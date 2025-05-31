@@ -5,15 +5,15 @@ from app.services.event_attendee_service import EventAttendeeService
 from app.services.matching.matcher import SpeedDateMatcher
 from app.extensions import db
 from flask import current_app
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import json
 
 
 class SpeedDateService:
     @staticmethod
     def generate_schedule(
-        event_id: int, num_tables: int = 15, num_rounds: int = 15
-    ) -> bool:
+        event_id: int, num_tables: int, num_rounds: int
+    ) -> Tuple[int, int]:
         """
         Generate speed dating schedule for an event
 
@@ -23,47 +23,44 @@ class SpeedDateService:
             num_rounds: Number of rounds to schedule
 
         Returns:
-            bool: True if schedule was generated successfully
+            Tuple[int, int]: num_rounds, num_tables
         """
         try:
-            # Delete any existing schedule for this event
             EventSpeedDate.query.filter_by(event_id=event_id).delete()
             db.session.commit()
 
-            # Get checked-in attendees
             attendees = EventAttendeeService.get_checked_in_attendees(event_id)
-
             if not attendees or len(attendees) < 2:
                 current_app.logger.warning(
                     f"Not enough attendees checked in for event {event_id} to generate schedule"
                 )
-                return False
+                return (-1, -1)
 
             males = [user for user in attendees if user.gender == Gender.MALE]
             females = [user for user in attendees if user.gender == Gender.FEMALE]
+            num_tables_adjusted = min(len(males), len(females)) if num_tables > min(len(males), len(females)) else num_tables
 
             if not males or not females:
                 current_app.logger.warning(
                     f"Need at least one person of each gender to generate schedule for event {event_id}"
                 )
-                return False
+                return (-1, -1)
 
             current_app.logger.info(
                 f"Generating schedule for event {event_id} with {len(males)} males and {len(females)} females"
             )
 
             compatible_dates, id_to_user = SpeedDateMatcher.find_all_potential_dates(
-                males, females, num_tables, num_rounds
+                males, females, num_tables_adjusted, num_rounds
             )
             speed_dates = SpeedDateMatcher.finalize_all_rounds(
                 compatible_dates,
                 id_to_user,
                 event_id,
-                num_tables,
+                num_tables_adjusted,
                 num_rounds,
             )
 
-            # Save to database
             for speed_date in speed_dates:
                 db.session.add(speed_date)
 
@@ -71,14 +68,14 @@ class SpeedDateService:
             current_app.logger.info(
                 f"Generated {len(speed_dates)} speed dates for event {event_id}"
             )
-            return True
+            return max([esd.round_number for esd in speed_dates]), num_tables_adjusted
 
         except Exception as e:
             db.session.rollback()
             current_app.logger.error(
                 f"Error generating schedule for event {event_id}: {str(e)}"
             )
-            return False
+            return (-1, -1)
 
     @staticmethod
     def get_schedule_for_attendee(event_id: int, user_id: int) -> List[Dict[str, Any]]:

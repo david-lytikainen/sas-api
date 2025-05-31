@@ -19,6 +19,7 @@ class Event(db.Model):
     price_per_person = db.Column(db.DECIMAL(10, 2), nullable=False)
     registration_deadline = db.Column(db.TIMESTAMP(timezone=True), nullable=False)
     num_rounds = db.Column(db.Integer, nullable=True)
+    num_tables = db.Column(db.Integer, nullable=True)
     created_at = db.Column(
         db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
     )
@@ -59,4 +60,6 @@ class Event(db.Model):
                 else None
             ),
             "registered_attendee_count": registered_attendee_count,
+            "num_rounds": self.num_rounds,
+            "num_tables": self.num_tables,
         }
