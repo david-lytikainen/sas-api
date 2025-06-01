@@ -38,7 +38,11 @@ class SpeedDateService:
 
             males = [user for user in attendees if user.gender == Gender.MALE]
             females = [user for user in attendees if user.gender == Gender.FEMALE]
-            num_tables_adjusted = min(len(males), len(females)) if num_tables > min(len(males), len(females)) else num_tables
+            num_tables_adjusted = (
+                min(len(males), len(females))
+                if num_tables > min(len(males), len(females))
+                else num_tables
+            )
 
             if not males or not females:
                 current_app.logger.warning(
