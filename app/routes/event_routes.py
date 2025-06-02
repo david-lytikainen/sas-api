@@ -1561,3 +1561,66 @@ def delete_event_route(event_id):
             f"Error deleting event {event_id}: {str(e)}", exc_info=True
         )
         return jsonify({"error": "Failed to delete event"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/waitlist", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def get_event_waitlist(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+
+    try:
+        event = Event.query.get_or_404(event_id)
+        current_user = User.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "User not found"}), 403
+
+        is_admin = current_user.role_id == UserRole.ADMIN.value
+        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
+            event.creator_id
+        ) == str(current_user_id)
+
+        if not is_admin and not is_event_creator:
+            return jsonify({"error": "Unauthorized to view event waitlist"}), 403
+
+        waitlist_entries = (
+            db.session.query(EventWaitlist, User, Church)
+            .join(User, EventWaitlist.user_id == User.id)
+            .outerjoin(Church, User.church_id == Church.id)
+            .filter(EventWaitlist.event_id == event_id)
+            .order_by(EventWaitlist.waitlisted_at.asc())
+            .all()
+        )
+
+        waitlist_data = [
+            {
+                "id": user.id,
+                "name": f"{user.first_name} {user.last_name}",
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "birthday": user.birthday.isoformat() if user.birthday else None,
+                "age": user.calculate_age(),
+                "gender": user.gender.value if user.gender else None,
+                "phone": user.phone,
+                "church": church.name if church else "Other",
+                "waitlisted_at": (
+                    wl_entry.waitlisted_at.isoformat()
+                    if wl_entry.waitlisted_at
+                    else None
+                ),
+                "status": "Waitlisted", # Explicitly set status
+            }
+            for wl_entry, user, church in waitlist_entries
+        ]
+        return jsonify(waitlist_data), 200
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Error retrieving waitlist for event {event_id}: {str(e)}", exc_info=True
+        )
+        return jsonify({"error": f"Error retrieving waitlist: {str(e)}"}), 500

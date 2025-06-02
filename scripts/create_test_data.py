@@ -18,8 +18,13 @@ from random import randrange
 from werkzeug.security import generate_password_hash
 from create_admin import create_admin_user
 from app.models.church import Church
+from app.services.event_service import EventService
 
 app = create_app()
+
+# Print the database URI the app is configured to use
+with app.app_context():
+    print(f"INFO: Connecting to database: {app.config['SQLALCHEMY_DATABASE_URI']}")
 
 
 def create_test_churches():
@@ -105,11 +110,12 @@ def create_test_event(creator_id):
         starts_at=starts_at,
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
-        max_capacity=50,  # More than our test users
-        status="In Progress",  # Use the string value directly
+        max_capacity=5,  # Reduced max_capacity to test waitlist
+        status="Registration Open",  # Changed to Registration Open to allow registrations
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
+        num_tables=10,
         num_rounds=10,
     )
 
@@ -125,24 +131,105 @@ def create_test_event(creator_id):
 
 def create_test_attendees(test_users, test_event):
     """Create event attendees from our test users"""
-    test_attendees = []
+    print(f"Attempting to register {len(test_users)} users for event '{test_event.name}' (ID: {test_event.id}) with max capacity {test_event.max_capacity}...")
+    registered_count = 0
+    waitlisted_count = 0
+    failed_count = 0
 
-    # Register all test users for the event
     for user in test_users:
-        attendee = EventAttendee(
-            event_id=test_event.id,
-            user_id=user.id,
-            status=RegistrationStatus.CHECKED_IN,  # Making them all checked in for testing
-            check_in_date=datetime.now(),  # Since we're testing speed dating matching
-            pin="1234",
-        )
-        test_attendees.append(attendee)
+        try:
+            # Attempt to register user, allowing them to join the waitlist if full
+            response = EventService.register_for_event(
+                event_id=test_event.id,
+                user_id=user.id,
+                join_waitlist=True  # Important for waitlist functionality
+            )
 
-    db.session.add_all(test_attendees)
-    db.session.commit()
+            message_text = ""
+            is_error = False
+            status_code_from_response = None
 
-    print(f"Created {len(test_attendees)} test attendees for event")
-    return test_attendees
+            if isinstance(response, tuple) and len(response) == 2:
+                message_dict, status_code_from_response = response
+                if status_code_from_response >= 400:
+                    is_error = True
+                    message_text = message_dict.get("error", str(message_dict))
+                else:
+                    message_text = message_dict.get("message", str(message_dict))
+            elif isinstance(response, dict):
+                if "error" in response:
+                    is_error = True
+                    message_text = response.get("error", str(response))
+                elif "message" in response:
+                    message_text = response.get("message", str(response))
+                else:
+                    message_text = str(response) # fallback for unknown dict structure
+            else:
+                message_text = f"Unexpected response type: {str(response)}"
+                is_error = True # Treat unexpected types as errors for counting
+
+            if is_error:
+                print(f"Failed to register/waitlist user {user.email} for event {test_event.id}. Response: {message_text}")
+                failed_count += 1
+            else:
+                if "Successfully registered" in message_text:
+                    print(f"User {user.email} successfully registered for event {test_event.id}.")
+                    registered_count += 1
+                elif "Successfully added to waitlist" in message_text or "Successfully joined the waitlist" in message_text:
+                    print(f"User {user.email} added to waitlist for event {test_event.id}.")
+                    waitlisted_count += 1
+                elif status_code_from_response == 200 or status_code_from_response == 201: # Catch-all for other success
+                    print(f"Registration processed for user {user.email} for event {test_event.id}: {message_text}")
+                    registered_count +=1 # Assume registration if not explicitly waitlisted and success code
+                else:
+                    # This case should ideally not be hit if logic above is correct
+                    print(f"Unhandled successful response for user {user.email}: {message_text}. Counting as failed.")
+                    failed_count +=1
+
+        except Exception as e:
+            print(f"Exception during registration for user {user.email} for event {test_event.id}: {str(e)}")
+            failed_count += 1
+
+    # Note: We are not directly creating EventAttendee records here anymore.
+    # The EventService.register_for_event handles creating EventAttendee or EventWaitlist records.
+    # To check in users, we'd need a separate loop after this,
+    # fetching actual registrations and then checking them in.
+    # For now, this focuses on getting them registered or waitlisted.
+
+    print(f"\nRegistration attempt summary for event {test_event.id}:")
+    print(f"  Successfully registered: {registered_count}")
+    print(f"  Added to waitlist: {waitlisted_count}")
+    print(f"  Failed attempts: {failed_count}")
+
+    # If you want to then check-in the successfully registered users:
+    print("\nAttempting to check-in successfully registered users...")
+    checked_in_count = 0
+    # Only fetch users who are actually in EventAttendee table with REGISTERED status
+    actually_registered_attendees = EventAttendee.query.join(User).filter(
+        EventAttendee.event_id == test_event.id,
+        EventAttendee.status == RegistrationStatus.REGISTERED
+    ).all()
+
+    print(f"Found {len(actually_registered_attendees)} users with status REGISTERED for event {test_event.id}.")
+
+    for attendee_record in actually_registered_attendees:
+        try:
+            # Simulate check-in using the service or directly update status
+            # For simplicity here, directly updating. In a real scenario, use a service if available.
+            attendee_record.status = RegistrationStatus.CHECKED_IN
+            attendee_record.check_in_date = datetime.now()
+            attendee_record.pin = "1234" # Example PIN
+            db.session.add(attendee_record)
+            print(f"Marking user ID {attendee_record.user_id} as CHECKED_IN.")
+            checked_in_count +=1
+        except Exception as e:
+            print(f"Failed to check in user ID {attendee_record.user_id}: {str(e)}")
+
+    if actually_registered_attendees: # only commit if there's something to commit
+        db.session.commit()
+    print(f"Successfully checked in {checked_in_count} users.")
+
+    # No return value needed as attendees are created by the service
 
 
 def delete_test_data():
@@ -153,6 +240,9 @@ def delete_test_data():
         db.session.query(EventSpeedDate).delete()
         db.session.query(EventTimer).delete()
         db.session.query(EventAttendee).delete()
+        # Need to also delete from EventWaitlist if it exists
+        from app.models.event_waitlist import EventWaitlist # Import here if not already
+        db.session.query(EventWaitlist).delete()
         db.session.query(Event).delete()
         db.session.query(User).delete()
         db.session.query(Church).delete()
@@ -186,10 +276,7 @@ def main():
         test_users = create_test_users(church_ids)
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
-        from app.services.speed_date_service import SpeedDateService
-
-        SpeedDateService.generate_schedule(test_event.id, num_tables=10, num_rounds=10)
-        have_attendees_match(test_event)
+        #have_attendees_match(test_event)
         create_admin_user(update=True)
 
 
