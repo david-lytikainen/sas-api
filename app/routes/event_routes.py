@@ -1613,7 +1613,7 @@ def get_event_waitlist(event_id):
                     if wl_entry.waitlisted_at
                     else None
                 ),
-                "status": "Waitlisted", # Explicitly set status
+                "status": "Waitlisted",  # Explicitly set status
             }
             for wl_entry, user, church in waitlist_entries
         ]

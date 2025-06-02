@@ -131,7 +131,9 @@ def create_test_event(creator_id):
 
 def create_test_attendees(test_users, test_event):
     """Create event attendees from our test users"""
-    print(f"Attempting to register {len(test_users)} users for event '{test_event.name}' (ID: {test_event.id}) with max capacity {test_event.max_capacity}...")
+    print(
+        f"Attempting to register {len(test_users)} users for event '{test_event.name}' (ID: {test_event.id}) with max capacity {test_event.max_capacity}..."
+    )
     registered_count = 0
     waitlisted_count = 0
     failed_count = 0
@@ -142,7 +144,7 @@ def create_test_attendees(test_users, test_event):
             response = EventService.register_for_event(
                 event_id=test_event.id,
                 user_id=user.id,
-                join_waitlist=True  # Important for waitlist functionality
+                join_waitlist=True,  # Important for waitlist functionality
             )
 
             message_text = ""
@@ -163,31 +165,48 @@ def create_test_attendees(test_users, test_event):
                 elif "message" in response:
                     message_text = response.get("message", str(response))
                 else:
-                    message_text = str(response) # fallback for unknown dict structure
+                    message_text = str(response)  # fallback for unknown dict structure
             else:
                 message_text = f"Unexpected response type: {str(response)}"
-                is_error = True # Treat unexpected types as errors for counting
+                is_error = True  # Treat unexpected types as errors for counting
 
             if is_error:
-                print(f"Failed to register/waitlist user {user.email} for event {test_event.id}. Response: {message_text}")
+                print(
+                    f"Failed to register/waitlist user {user.email} for event {test_event.id}. Response: {message_text}"
+                )
                 failed_count += 1
             else:
                 if "Successfully registered" in message_text:
-                    print(f"User {user.email} successfully registered for event {test_event.id}.")
+                    print(
+                        f"User {user.email} successfully registered for event {test_event.id}."
+                    )
                     registered_count += 1
-                elif "Successfully added to waitlist" in message_text or "Successfully joined the waitlist" in message_text:
-                    print(f"User {user.email} added to waitlist for event {test_event.id}.")
+                elif (
+                    "Successfully added to waitlist" in message_text
+                    or "Successfully joined the waitlist" in message_text
+                ):
+                    print(
+                        f"User {user.email} added to waitlist for event {test_event.id}."
+                    )
                     waitlisted_count += 1
-                elif status_code_from_response == 200 or status_code_from_response == 201: # Catch-all for other success
-                    print(f"Registration processed for user {user.email} for event {test_event.id}: {message_text}")
-                    registered_count +=1 # Assume registration if not explicitly waitlisted and success code
+                elif (
+                    status_code_from_response == 200 or status_code_from_response == 201
+                ):  # Catch-all for other success
+                    print(
+                        f"Registration processed for user {user.email} for event {test_event.id}: {message_text}"
+                    )
+                    registered_count += 1  # Assume registration if not explicitly waitlisted and success code
                 else:
                     # This case should ideally not be hit if logic above is correct
-                    print(f"Unhandled successful response for user {user.email}: {message_text}. Counting as failed.")
-                    failed_count +=1
+                    print(
+                        f"Unhandled successful response for user {user.email}: {message_text}. Counting as failed."
+                    )
+                    failed_count += 1
 
         except Exception as e:
-            print(f"Exception during registration for user {user.email} for event {test_event.id}: {str(e)}")
+            print(
+                f"Exception during registration for user {user.email} for event {test_event.id}: {str(e)}"
+            )
             failed_count += 1
 
     # Note: We are not directly creating EventAttendee records here anymore.
@@ -205,12 +224,18 @@ def create_test_attendees(test_users, test_event):
     print("\nAttempting to check-in successfully registered users...")
     checked_in_count = 0
     # Only fetch users who are actually in EventAttendee table with REGISTERED status
-    actually_registered_attendees = EventAttendee.query.join(User).filter(
-        EventAttendee.event_id == test_event.id,
-        EventAttendee.status == RegistrationStatus.REGISTERED
-    ).all()
+    actually_registered_attendees = (
+        EventAttendee.query.join(User)
+        .filter(
+            EventAttendee.event_id == test_event.id,
+            EventAttendee.status == RegistrationStatus.REGISTERED,
+        )
+        .all()
+    )
 
-    print(f"Found {len(actually_registered_attendees)} users with status REGISTERED for event {test_event.id}.")
+    print(
+        f"Found {len(actually_registered_attendees)} users with status REGISTERED for event {test_event.id}."
+    )
 
     for attendee_record in actually_registered_attendees:
         try:
@@ -218,14 +243,14 @@ def create_test_attendees(test_users, test_event):
             # For simplicity here, directly updating. In a real scenario, use a service if available.
             attendee_record.status = RegistrationStatus.CHECKED_IN
             attendee_record.check_in_date = datetime.now()
-            attendee_record.pin = "1234" # Example PIN
+            attendee_record.pin = "1234"  # Example PIN
             db.session.add(attendee_record)
             print(f"Marking user ID {attendee_record.user_id} as CHECKED_IN.")
-            checked_in_count +=1
+            checked_in_count += 1
         except Exception as e:
             print(f"Failed to check in user ID {attendee_record.user_id}: {str(e)}")
 
-    if actually_registered_attendees: # only commit if there's something to commit
+    if actually_registered_attendees:  # only commit if there's something to commit
         db.session.commit()
     print(f"Successfully checked in {checked_in_count} users.")
 
@@ -241,7 +266,10 @@ def delete_test_data():
         db.session.query(EventTimer).delete()
         db.session.query(EventAttendee).delete()
         # Need to also delete from EventWaitlist if it exists
-        from app.models.event_waitlist import EventWaitlist # Import here if not already
+        from app.models.event_waitlist import (
+            EventWaitlist,
+        )  # Import here if not already
+
         db.session.query(EventWaitlist).delete()
         db.session.query(Event).delete()
         db.session.query(User).delete()
@@ -276,7 +304,7 @@ def main():
         test_users = create_test_users(church_ids)
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
-        #have_attendees_match(test_event)
+        # have_attendees_match(test_event)
         create_admin_user(update=True)
 
 
