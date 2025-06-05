@@ -691,7 +691,10 @@ def update_attendee_details(event_id, attendee_id):
         print(f"Error updating attendee details: {str(e)}")
         return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
 
-@event_bp.route("/events/<int:event_id>/waitlist/<int:user_id>", methods=["PATCH", "OPTIONS"])
+
+@event_bp.route(
+    "/events/<int:event_id>/waitlist/<int:user_id>", methods=["PATCH", "OPTIONS"]
+)
 @cross_origin(supports_credentials=True)
 @jwt_required()
 def update_waitlist_attendee_details(event_id, user_id):
@@ -719,7 +722,9 @@ def update_waitlist_attendee_details(event_id, user_id):
 
         if not is_admin and not is_event_creator:
             return (
-                jsonify({"error": "Unauthorized to update waitlist attendee information"}),
+                jsonify(
+                    {"error": "Unauthorized to update waitlist attendee information"}
+                ),
                 403,
             )
 
@@ -745,7 +750,7 @@ def update_waitlist_attendee_details(event_id, user_id):
         if "first_name" in data and data["first_name"]:
             user_to_update.first_name = data["first_name"]
             updated_fields.append("first_name")
-        
+
         if "last_name" in data and data["last_name"]:
             user_to_update.last_name = data["last_name"]
             updated_fields.append("last_name")
@@ -777,7 +782,9 @@ def update_waitlist_attendee_details(event_id, user_id):
                 updated_fields.append("birthday")
             except (ValueError, TypeError):
                 return (
-                    jsonify({"error": "Invalid birthday format. Use YYYY-MM-DD string"}),
+                    jsonify(
+                        {"error": "Invalid birthday format. Use YYYY-MM-DD string"}
+                    ),
                     400,
                 )
         if "church" in data and data["church"]:
@@ -786,7 +793,7 @@ def update_waitlist_attendee_details(event_id, user_id):
                 church = None
 
                 if isinstance(church_input, int):
-                     church = Church.query.get(church_input)
+                    church = Church.query.get(church_input)
                 elif isinstance(church_input, str):
                     church = Church.query.filter_by(name=church_input).first()
                     if not church and church_input:
@@ -802,9 +809,11 @@ def update_waitlist_attendee_details(event_id, user_id):
                     updated_fields.append("church")
 
             except Exception as e:
-                current_app.logger.error(f"Error updating church for waitlist user {user_id} in event {event_id}: {str(e)}")
+                current_app.logger.error(
+                    f"Error updating church for waitlist user {user_id} in event {event_id}: {str(e)}"
+                )
                 return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-        
+
         # Save changes if any fields were updated
         if updated_fields:
             db.session.commit()
@@ -854,7 +863,10 @@ def update_waitlist_attendee_details(event_id, user_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error updating waitlist user {user_id} in event {event_id}: {str(e)}", exc_info=True)
+        current_app.logger.error(
+            f"Error updating waitlist user {user_id} in event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": f"Error updating waitlist user: {str(e)}"}), 500
 
 
