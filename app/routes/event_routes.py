@@ -692,6 +692,184 @@ def update_attendee_details(event_id, attendee_id):
         return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
 
 
+@event_bp.route(
+    "/events/<int:event_id>/waitlist/<int:user_id>", methods=["PATCH", "OPTIONS"]
+)
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def update_waitlist_attendee_details(event_id, user_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
+    verify_jwt_in_request()
+    current_user_id = get_jwt_identity()
+
+    try:
+        # Get the event
+        event = Event.query.get_or_404(event_id)
+
+        # Get the user and verify permissions
+        current_user = User.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "User not found"}), 403
+
+        # Check if user has permission to update attendees
+        is_admin = current_user.role_id == UserRole.ADMIN.value
+        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
+            event.creator_id
+        ) == str(current_user_id)
+
+        if not is_admin and not is_event_creator:
+            return (
+                jsonify(
+                    {"error": "Unauthorized to update waitlist attendee information"}
+                ),
+                403,
+            )
+
+        # Get request data
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No update data provided"}), 400
+
+        # Get the user to update
+        user_to_update = User.query.get_or_404(user_id)
+
+        # Also verify this user is actually waitlisted for this event
+        waitlist_entry = EventWaitlist.query.filter_by(
+            event_id=event_id, user_id=user_id
+        ).first()
+        if not waitlist_entry:
+            return jsonify({"error": "User is not waitlisted for this event"}), 404
+
+        # Track which fields were updated
+        updated_fields = []
+
+        # Update user fields if provided
+        if "first_name" in data and data["first_name"]:
+            user_to_update.first_name = data["first_name"]
+            updated_fields.append("first_name")
+
+        if "last_name" in data and data["last_name"]:
+            user_to_update.last_name = data["last_name"]
+            updated_fields.append("last_name")
+
+        if "email" in data and data["email"]:
+            user_to_update.email = data["email"]
+            updated_fields.append("email")
+
+        if "phone" in data and data["phone"]:
+            user_to_update.phone = data["phone"]
+            updated_fields.append("phone")
+
+        if "gender" in data and data["gender"]:
+            try:
+                user_to_update.gender = Gender[data["gender"].upper()]
+                updated_fields.append("gender")
+            except KeyError:
+                return (
+                    jsonify(
+                        {"error": "Invalid gender value. Must be either MALE or FEMALE"}
+                    ),
+                    400,
+                )
+        if "birthday" in data and data["birthday"]:
+            try:
+                user_to_update.birthday = datetime.strptime(
+                    data["birthday"], "%Y-%m-%d"
+                ).date()
+                updated_fields.append("birthday")
+            except (ValueError, TypeError):
+                return (
+                    jsonify(
+                        {"error": "Invalid birthday format. Use YYYY-MM-DD string"}
+                    ),
+                    400,
+                )
+        if "church" in data and data["church"]:
+            try:
+                church_input = data["church"]
+                church = None
+
+                if isinstance(church_input, int):
+                    church = Church.query.get(church_input)
+                elif isinstance(church_input, str):
+                    church = Church.query.filter_by(name=church_input).first()
+                    if not church and church_input:
+                        church = Church(name=church_input)
+                        db.session.add(church)
+                        db.session.flush()
+
+                if church:
+                    user_to_update.church_id = church.id
+                    updated_fields.append("church")
+                elif not church_input:
+                    user_to_update.church_id = None
+                    updated_fields.append("church")
+
+            except Exception as e:
+                current_app.logger.error(
+                    f"Error updating church for waitlist user {user_id} in event {event_id}: {str(e)}"
+                )
+                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
+
+        # Save changes if any fields were updated
+        if updated_fields:
+            db.session.commit()
+
+            # Refresh the user_to_update object to get the latest church data
+            db.session.refresh(user_to_update)
+
+            # Get updated attendee data to return to frontend
+            church_name = "Other"
+            if user_to_update.church_id:
+                church = Church.query.get(user_to_update.church_id)
+                if church:
+                    church_name = church.name
+
+            # Construct the user part of the response
+            response_user_data = {
+                "id": user_to_update.id,
+                "name": f"{user_to_update.first_name} {user_to_update.last_name}",
+                "email": user_to_update.email,
+                "first_name": user_to_update.first_name,
+                "last_name": user_to_update.last_name,
+                "birthday": (
+                    user_to_update.birthday.isoformat()
+                    if user_to_update.birthday
+                    else None
+                ),
+                "age": user_to_update.calculate_age(),
+                "gender": (
+                    user_to_update.gender.value if user_to_update.gender else None
+                ),
+                "phone": user_to_update.phone,
+                "church": church_name,
+            }
+
+            return (
+                jsonify(
+                    {
+                        "message": "Waitlist user details updated successfully",
+                        "updated_fields": updated_fields,
+                        "user": response_user_data,
+                    }
+                ),
+                200,
+            )
+        else:
+            return jsonify({"message": "No fields were updated"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(
+            f"Error updating waitlist user {user_id} in event {event_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": f"Error updating waitlist user: {str(e)}"}), 500
+
+
 @event_bp.route("/events/<int:event_id>/schedule", methods=["GET"])
 @jwt_required()
 def get_schedule(event_id):
