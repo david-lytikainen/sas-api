@@ -273,8 +273,6 @@ def generate_schedules(event_id):
                 400,
             )
 
-        EventTimerService.delete_timer(event_id)
-        EventTimerService.create_timer(event_id)
         num_rounds_actual, num_tables_actual = SpeedDateService.generate_schedule(
             event_id, num_tables, num_rounds
         )
@@ -284,6 +282,8 @@ def generate_schedules(event_id):
             event.num_rounds = num_rounds_actual
             event.num_tables = num_tables_actual
             db.session.commit()
+            EventTimerService.delete_timer(event_id)
+            EventTimerService.create_timer(event_id)
             current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
             return jsonify({"message": "Event schedule generated"})
         else:
