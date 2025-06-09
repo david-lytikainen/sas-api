@@ -1178,11 +1178,7 @@ def next_round(event_id):
         if not is_admin:
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
-        data = request.get_json() or {}
-        final_round = data.get("final_round", 10)
-
-        # Advance to next round
-        result = EventTimerService.next_round(event_id, final_round)
+        result = EventTimerService.next_round(event_id)
 
         if "error" in result:
             return jsonify(result), 400
@@ -1260,12 +1256,8 @@ def update_round_duration(event_id):
 @jwt_required()
 def get_round_info(event_id):
     """Get minimal round information for regular attendees"""
-    current_user_id = get_jwt_identity()
 
     try:
-        # Check if event exists
-        event = Event.query.get_or_404(event_id)
-
         try:
             # Try to get timer status
             timer_status = EventTimerService.get_timer_status(event_id)

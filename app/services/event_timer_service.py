@@ -72,13 +72,13 @@ class EventTimerService:
             }
 
     @staticmethod
-    def next_round(event_id: int, final_round) -> Dict[str, Any]:
+    def next_round(event_id: int) -> Dict[str, Any]:
         """Advance to the next round"""
         timer = EventTimerRepository.get_timer(event_id)
         if not timer:
             return {"error": "Timer not found"}
 
-        if timer.current_round >= final_round:
+        if timer.current_round >= timer.final_round:
             return {
                 "timer": timer.to_dict(),
                 "message": "All rounds completed",
@@ -140,20 +140,18 @@ class EventTimerService:
             if timer.round_start_time
             else False
         )
-        if timer.is_paused:
+        if timer.is_paused: #paused
             result["status"] = "paused"
             result["time_remaining"] = timer.pause_time_remaining
-        elif (
-            timer.current_round >= timer.final_round and not timer.is_paused and isEnded
-        ):
+        elif (timer.current_round >= timer.final_round and not timer.is_paused and isEnded): #ended
             result["status"] = "ended"
-        elif timer.round_start_time:
+        elif timer.round_start_time: #active
             result["status"] = "active"
             if timer.pause_time_remaining is not None and timer.is_paused is False:
                 result["time_remaining"] = timer.pause_time_remaining
             else:
                 result["time_remaining"] = timer.round_duration
-        else:
+        else: #inactive
             result["status"] = "inactive"
             result["time_remaining"] = 0
 
