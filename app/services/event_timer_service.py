@@ -140,20 +140,24 @@ class EventTimerService:
             if timer.round_start_time
             else False
         )
-        if timer.is_paused: #paused
+        if timer.is_paused:  # paused
             result["status"] = "paused"
             result["time_remaining"] = timer.pause_time_remaining
-        elif (timer.current_round >= timer.final_round and not timer.is_paused and isRoundEnded): #ended
+        elif (
+            timer.current_round >= timer.final_round
+            and not timer.is_paused
+            and isRoundEnded
+        ):  # ended
             result["status"] = "ended"
-        elif (isRoundEnded):
+        elif isRoundEnded:
             result["status"] = "break_time"
-        elif timer.round_start_time: #active
+        elif timer.round_start_time:  # active
             result["status"] = "active"
             if timer.pause_time_remaining is not None and timer.is_paused is False:
                 result["time_remaining"] = timer.pause_time_remaining
             else:
                 result["time_remaining"] = timer.round_duration
-        else: #inactive
+        else:  # inactive
             result["status"] = "inactive"
             result["time_remaining"] = 0
 
