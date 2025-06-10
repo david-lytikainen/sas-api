@@ -135,7 +135,7 @@ class EventTimerService:
         }
 
         now = datetime.now(pytz.UTC)
-        isEnded = (
+        isRoundEnded = (
             ((now - timer.round_start_time).total_seconds() >= timer.round_duration)
             if timer.round_start_time
             else False
@@ -143,8 +143,10 @@ class EventTimerService:
         if timer.is_paused: #paused
             result["status"] = "paused"
             result["time_remaining"] = timer.pause_time_remaining
-        elif (timer.current_round >= timer.final_round and not timer.is_paused and isEnded): #ended
+        elif (timer.current_round >= timer.final_round and not timer.is_paused and isRoundEnded): #ended
             result["status"] = "ended"
+        elif (isRoundEnded):
+            result["status"] = "break_time"
         elif timer.round_start_time: #active
             result["status"] = "active"
             if timer.pause_time_remaining is not None and timer.is_paused is False:
