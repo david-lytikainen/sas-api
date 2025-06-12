@@ -68,6 +68,23 @@ class SpeedDateMatcher:
                     )
                 ]
 
+            if len(compatible_dates) < SpeedDateMatcher.min_dates_threshold(
+                num_tables, num_rounds, num_same_gender
+            ):
+                compatible_dates = [
+                    match
+                    for match in all_opposite_gender
+                    if (
+                        attendee.church_id != match.church_id
+                        or attendee.church_id is None
+                        or match.church_id is None
+                    )
+                    and (
+                        abs(attendee.calculate_age() - match.calculate_age())
+                        <= 5
+                    )
+                ]
+
             all_compatible_dates[attendee.id] = compatible_dates
 
         return (all_compatible_dates, id_to_user)
