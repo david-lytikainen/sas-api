@@ -79,10 +79,7 @@ class SpeedDateMatcher:
                         or attendee.church_id is None
                         or match.church_id is None
                     )
-                    and (
-                        abs(attendee.calculate_age() - match.calculate_age())
-                        <= 5
-                    )
+                    and (abs(attendee.calculate_age() - match.calculate_age()) <= 5)
                 ]
 
             all_compatible_dates[attendee.id] = compatible_dates
