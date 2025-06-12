@@ -108,6 +108,8 @@ class SpeedDateService:
                     .all()
                 )
                 partner_id_field = "female_id"
+                interested_field = "male_interested"
+                partner_interested_field = "female_interested"
             else:
                 # For females, look at the female_id field
                 speed_dates = (
@@ -116,6 +118,8 @@ class SpeedDateService:
                     .all()
                 )
                 partner_id_field = "male_id"
+                interested_field = "female_interested"
+                partner_interested_field = "male_interested"
 
             # Get user's church name
             user_church = "Other"
@@ -148,6 +152,11 @@ class SpeedDateService:
                     # Calculate partner's age
                     partner_age = partner.calculate_age()
 
+                    # Determine if there's a match (both interested)
+                    user_interested = getattr(date, interested_field)
+                    partner_interested = getattr(date, partner_interested_field)
+                    is_match = user_interested is True and partner_interested is True
+
                     schedule.append(
                         {
                             "round": date.round_number,
@@ -156,9 +165,11 @@ class SpeedDateService:
                             "partner_name": f"{partner.first_name} {partner.last_name}",
                             "partner_age": partner_age,
                             "partner_church": partner_church,
+                            "partner_email": partner.email,
                             "user_age": user_age,
                             "user_church": user_church,
                             "event_speed_date_id": date.id,
+                            "match": is_match,
                         }
                     )
 
