@@ -9,8 +9,8 @@ from app.repositories.event_waitlist_repository import EventWaitlistRepository
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models import Event
+from app.extensions import db
 from typing import List
-
 
 class EventService:
     @staticmethod
@@ -74,7 +74,8 @@ class EventService:
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
             event_id, user_id
         )
-        if existing_registration:
+        # Allow re-registration if previous registration was cancelled
+        if existing_registration and existing_registration.status != RegistrationStatus.CANCELLED:
             return {"error": "You are already registered for this event"}
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
         if on_waitlist:
@@ -115,14 +116,27 @@ class EventService:
         # Generate random 4-digit PIN
         pin = "".join(random.choices("0123456789", k=4))
 
-        EventAttendeeRepository.register_for_event(
-            {
-                "event_id": event_id,
-                "user_id": user_id,
-                "status": RegistrationStatus.REGISTERED,
-                "pin": pin,
-            }
-        )
+        # If user had a previous cancelled registration, update it instead of creating new
+        if existing_registration and existing_registration.status == RegistrationStatus.CANCELLED:
+            existing_registration.status = RegistrationStatus.REGISTERED
+            existing_registration.pin = pin
+            existing_registration.registration_date = datetime.now(timezone.utc)
+            existing_registration.check_in_date = None
+            existing_registration.updated_at = datetime.now(timezone.utc)
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                return {"error": f"Failed to re-register for event: {str(e)}"}
+        else:
+            EventAttendeeRepository.register_for_event(
+                {
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "status": RegistrationStatus.REGISTERED,
+                    "pin": pin,
+                }
+            )
 
         return {"message": "Successfully registered for event"}
 
@@ -138,11 +152,11 @@ class EventService:
                 "error": "Event is not open for registration for waitlisting"
             }  # Or a different message
 
-        # Double check if user is already registered (should have been caught earlier)
+        # Check if user has an active registration (not cancelled)
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
             event_id, user_id
         )
-        if existing_registration:
+        if existing_registration and existing_registration.status != RegistrationStatus.CANCELLED:
             return {
                 "error": "You are already registered for this event, cannot join waitlist"
             }
@@ -176,7 +190,10 @@ class EventService:
         if not registration:
             return {"error": "You are not registered for this event or on its waitlist"}
 
-        EventAttendeeRepository.delete(event_id, user_id)
+        # Update registration status to CANCELLED instead of deleting
+        registration.status = RegistrationStatus.CANCELLED
+        registration.cancelled_at = datetime.now(timezone.utc)
+        db.session.commit()
 
         # Attempt to register the first person from the waitlist if a spot opened up
         EventService.process_waitlist_for_event(event_id)

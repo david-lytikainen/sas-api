@@ -110,7 +110,7 @@ def create_test_event(creator_id):
         starts_at=starts_at,
         address="123 Test Street, Test City, TS 12345",
         name="Test Speed Dating Night",
-        max_capacity=5,  # Reduced max_capacity to test waitlist
+        max_capacity=20,  # Reduced max_capacity to test waitlist
         status="Registration Open",  # Changed to Registration Open to allow registrations
         price_per_person=Decimal("25.00"),
         registration_deadline=starts_at - timedelta(hours=2),

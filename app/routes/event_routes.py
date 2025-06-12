@@ -34,8 +34,11 @@ def get_events():
     # Get all events
     events_data = EventService.get_events_for_user(user_id)
 
-    # Get user's actual registrations
-    user_registrations = EventAttendee.query.filter_by(user_id=user_id).all()
+    # Get user's actual registrations (excluding cancelled ones)
+    user_registrations = EventAttendee.query.filter(
+        EventAttendee.user_id == user_id,
+        EventAttendee.status != RegistrationStatus.CANCELLED
+    ).all()
     registrations_map = {
         reg.event_id: {
             "event_id": reg.event_id,
@@ -468,7 +471,7 @@ def get_event_attendees(event_id):
         if not is_admin and not is_event_creator:
             return jsonify({"error": "Unauthorized to view attendee information"}), 403
 
-        # Get all attendees with detailed user information
+        # Get all attendees with detailed user information (including cancelled for analytics)
         attendees = (
             db.session.query(EventAttendee, User, Church)
             .join(User, EventAttendee.user_id == User.id)
@@ -476,7 +479,7 @@ def get_event_attendees(event_id):
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(
-                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN, RegistrationStatus.CANCELLED]
                 ),
             )
             .all()

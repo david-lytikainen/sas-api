@@ -15,6 +15,7 @@ class EventAttendee(db.Model):
         db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
     )
     check_in_date = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
     updated_at = db.Column(
         db.TIMESTAMP(timezone=True),
         nullable=False,
@@ -35,6 +36,7 @@ class EventAttendee(db.Model):
             f"pin={self.pin}, "
             f"registration_date={self.registration_date}, "
             f"check_in_date={self.check_in_date}, "
+            f"cancelled_at={self.cancelled_at}, "
             f"updated_at={self.updated_at}, "
             f"created_at={self.created_at}"
             f")"
