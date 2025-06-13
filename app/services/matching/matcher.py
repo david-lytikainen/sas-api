@@ -23,7 +23,9 @@ class SpeedDateMatcher:
         """
         current_app.logger.info(f"\n\n=== Finding potential dates ===")
         current_app.logger.info(f"Males: {len(males)}, Females: {len(females)}")
-        current_app.logger.info(f"Initial age difference: {initial_age_difference}, Extended: {extended_age_difference}")
+        current_app.logger.info(
+            f"Initial age difference: {initial_age_difference}, Extended: {extended_age_difference}"
+        )
         current_app.logger.info(f"Tables: {num_tables}, Rounds: {num_rounds}\n")
 
         all_compatible_dates = {}
@@ -36,11 +38,17 @@ class SpeedDateMatcher:
 
         # Find matches for each attendee
         for attendee in males + females:
-            current_app.logger.info(f"\n--- Processing {attendee.first_name} {attendee.last_name} (ID: {attendee.id}) ---")
-            current_app.logger.info(f"Gender: {attendee.gender}, Age: {attendee.calculate_age()}")
-            
+            current_app.logger.info(
+                f"\n--- Processing {attendee.first_name} {attendee.last_name} (ID: {attendee.id}) ---"
+            )
+            current_app.logger.info(
+                f"Gender: {attendee.gender}, Age: {attendee.calculate_age()}"
+            )
+
             all_opposite_gender = females if attendee.gender == Gender.MALE else males
-            current_app.logger.info(f"Total potential matches in opposite gender: {len(all_opposite_gender)}")
+            current_app.logger.info(
+                f"Total potential matches in opposite gender: {len(all_opposite_gender)}"
+            )
 
             compatible_dates = [
                 match
@@ -55,7 +63,9 @@ class SpeedDateMatcher:
                     <= initial_age_difference
                 )
             ]
-            current_app.logger.info(f"\nInitial len of compatible dates (age diff <= {initial_age_difference}): {len(compatible_dates)}")
+            current_app.logger.info(
+                f"\nInitial len of compatible dates (age diff <= {initial_age_difference}): {len(compatible_dates)}"
+            )
 
             # If not enough matches, try extended age range
             num_same_gender = (
@@ -65,10 +75,14 @@ class SpeedDateMatcher:
                 num_tables, num_rounds, num_same_gender
             )
             current_app.logger.info(f"\nMinimum dates needed: {min_dates_needed}")
-            current_app.logger.info(f"Current compatible dates: {len(compatible_dates)}")
+            current_app.logger.info(
+                f"Current compatible dates: {len(compatible_dates)}"
+            )
 
             if len(compatible_dates) < min_dates_needed:
-                current_app.logger.info(f"\nNot enough matches, trying extended age range (<= {extended_age_difference})")
+                current_app.logger.info(
+                    f"\nNot enough matches, trying extended age range (<= {extended_age_difference})"
+                )
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
@@ -84,7 +98,9 @@ class SpeedDateMatcher:
                 ]
 
             if len(compatible_dates) < min_dates_needed:
-                current_app.logger.info(f"\nStill not enough matches, trying maximum age range (<= 5)")
+                current_app.logger.info(
+                    f"\nStill not enough matches, trying maximum age range (<= 5)"
+                )
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
