@@ -126,11 +126,10 @@ class SpeedDateMatcher:
         first, calculate the max number of dates that person can have
         then, take the floor of max_dates * .5
         """
-        return 6
         if num_same_gender == 0:
             return 0
         max_dates = math.ceil(num_tables * (num_rounds / num_same_gender))
-        return math.floor(max_dates * 0.5)
+        return math.floor(max_dates)
 
     @staticmethod
     def finalize_all_rounds(
