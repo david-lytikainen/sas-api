@@ -111,6 +111,10 @@ class SpeedDateMatcher:
         Returns:
             list of all speed dates for the night
         """
+        current_app.logger.info(f"\n\n\n=== Starting schedule generation for event {event_id} ===")
+        current_app.logger.info(f"Requested rounds: {num_rounds}, Tables: {num_tables}")
+        current_app.logger.info(f"Total attendees: {len(all_compatible_dates)}\n\n\n")
+        
         event_speed_dates: List[EventSpeedDate] = []
         rounds_completed_per_attendee: Dict[int, int] = {
             k: 0 for k, _ in all_compatible_dates.items()
@@ -120,6 +124,16 @@ class SpeedDateMatcher:
             current_app.logger.info(
                 "\n---\nFilling up all tables for ROUND %d\n---\n\n", current_round
             )
+            current_app.logger.info(f"Tables to fill: {num_tables}")
+            
+            # Log compatible dates state at start of round
+            current_app.logger.info("\nCompatible dates at start of round:")
+            for user_id, compatible_dates in all_compatible_dates.items():
+                user = id_to_user[user_id]
+                current_app.logger.info(
+                    f"User {user_id} ({user.first_name} {user.last_name}) has {len(compatible_dates)} compatible dates"
+                )
+
             # Sort attendees by number of rounds participated in then by least potential dates
             sorted_attendees = sorted(
                 all_compatible_dates,
@@ -128,16 +142,28 @@ class SpeedDateMatcher:
                     len(all_compatible_dates[user_id]),
                 ),
             )
-            attendees_seated_this_round = set()
+            
+            current_app.logger.info("\nSorted attendees by priority (rounds completed, compatible dates):")
+            for user_id in sorted_attendees:
+                user = id_to_user[user_id]
+                current_app.logger.info(
+                    f"User {user_id} ({user.first_name} {user.last_name}): "
+                    f"{rounds_completed_per_attendee[user_id]} rounds completed, "
+                    f"{len(all_compatible_dates[user_id])} compatible dates"
+                )
 
+            attendees_seated_this_round = set()
             tables_available_this_round = [
                 table_number for table_number in range(1, num_tables + 1)
             ]
             for attendee_id in sorted_attendees:
                 attendee = id_to_user[attendee_id]
                 if attendee_id in attendees_seated_this_round:
+                    current_app.logger.info(f"User {attendee_id} ({attendee.first_name} {attendee.last_name}) already seated this round, skipping")
                     continue
 
+                current_app.logger.info(f"\nTrying to seat User {attendee_id} ({attendee.first_name} {attendee.last_name})")
+                
                 # sort this attendee's compatible dates by fewest rounds participated in then by age difference
                 sorted_compatible_dates = sorted(
                     all_compatible_dates[attendee_id],
@@ -146,6 +172,14 @@ class SpeedDateMatcher:
                         abs(user.calculate_age() - attendee.calculate_age()),
                     ),
                 )
+                
+                current_app.logger.info(f"Found {len(sorted_compatible_dates)} potential matches")
+                for potential_match in sorted_compatible_dates:
+                    current_app.logger.info(
+                        f"Potential match: {potential_match.first_name} {potential_match.last_name} "
+                        f"(Rounds completed: {rounds_completed_per_attendee[potential_match.id]}, "
+                        f"Age diff: {abs(potential_match.calculate_age() - attendee.calculate_age())})"
+                    )
 
                 for compatible_date in sorted_compatible_dates:
                     if compatible_date.id not in attendees_seated_this_round:
@@ -171,6 +205,7 @@ class SpeedDateMatcher:
                         previous_table = previous_tables[0] if previous_tables else None
                         if previous_table:
                             table_number = previous_table
+                            current_app.logger.info(f"Reusing previous table {previous_table} for continuity")
                             tables_available_this_round.remove(previous_table)
                         else:
                             table_number = tables_available_this_round.pop(0)
@@ -181,6 +216,14 @@ class SpeedDateMatcher:
                             female_id,
                             table_number,
                             current_round,
+                        )
+
+                        male_user = id_to_user[male_id]
+                        female_user = id_to_user[female_id]
+                        current_app.logger.info(
+                            f"\nAssigned table {table_number} for round {current_round}:"
+                            f"\n  Male: {male_user.first_name} {male_user.last_name} (ID: {male_id})"
+                            f"\n  Female: {female_user.first_name} {female_user.last_name} (ID: {female_id})"
                         )
 
                         # track that both these people are now in the current round
