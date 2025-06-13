@@ -217,6 +217,13 @@ class SpeedDateMatcher:
                     )
                     break
 
+            # If we couldn't fill all tables this round, stop here
+            if len(tables_available_this_round) > 0:
+                current_app.logger.info(
+                    f"Could not fill all tables for ROUND {current_round}. Stopping schedule generation."
+                )
+                break
+
         return event_speed_dates
 
     @staticmethod
