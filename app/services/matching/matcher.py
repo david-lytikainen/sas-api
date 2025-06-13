@@ -21,6 +21,11 @@ class SpeedDateMatcher:
         Find all potential matches for each attendee.
         +-3 years age difference (+-4 years if they don't have the threshold amount of potential dates)
         """
+        current_app.logger.info(f"\n\n=== Finding potential dates ===")
+        current_app.logger.info(f"Males: {len(males)}, Females: {len(females)}")
+        current_app.logger.info(f"Initial age difference: {initial_age_difference}, Extended: {extended_age_difference}")
+        current_app.logger.info(f"Tables: {num_tables}, Rounds: {num_rounds}\n")
+
         all_compatible_dates = {}
         id_to_user = {}
 
@@ -31,7 +36,11 @@ class SpeedDateMatcher:
 
         # Find matches for each attendee
         for attendee in males + females:
+            current_app.logger.info(f"\n--- Processing {attendee.first_name} {attendee.last_name} (ID: {attendee.id}) ---")
+            current_app.logger.info(f"Gender: {attendee.gender}, Age: {attendee.calculate_age()}")
+            
             all_opposite_gender = females if attendee.gender == Gender.MALE else males
+            current_app.logger.info(f"Total potential matches in opposite gender: {len(all_opposite_gender)}")
 
             compatible_dates = [
                 match
@@ -46,14 +55,20 @@ class SpeedDateMatcher:
                     <= initial_age_difference
                 )
             ]
+            current_app.logger.info(f"\nInitial len of compatible dates (age diff <= {initial_age_difference}): {len(compatible_dates)}")
 
             # If not enough matches, try extended age range
             num_same_gender = (
                 len(females) if attendee.gender == Gender.FEMALE else len(males)
             )
-            if len(compatible_dates) < SpeedDateMatcher.min_dates_threshold(
+            min_dates_needed = SpeedDateMatcher.min_dates_threshold(
                 num_tables, num_rounds, num_same_gender
-            ):
+            )
+            current_app.logger.info(f"\nMinimum dates needed: {min_dates_needed}")
+            current_app.logger.info(f"Current compatible dates: {len(compatible_dates)}")
+
+            if len(compatible_dates) < min_dates_needed:
+                current_app.logger.info(f"\nNot enough matches, trying extended age range (<= {extended_age_difference})")
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
@@ -68,9 +83,8 @@ class SpeedDateMatcher:
                     )
                 ]
 
-            if len(compatible_dates) < SpeedDateMatcher.min_dates_threshold(
-                num_tables, num_rounds, num_same_gender
-            ):
+            if len(compatible_dates) < min_dates_needed:
+                current_app.logger.info(f"\nStill not enough matches, trying maximum age range (<= 5)")
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
@@ -83,6 +97,9 @@ class SpeedDateMatcher:
                 ]
 
             all_compatible_dates[attendee.id] = compatible_dates
+            current_app.logger.info(
+                f"\nFinal compatible dates for {attendee.first_name} {attendee.last_name}: {len(compatible_dates)}"
+            )
 
         return (all_compatible_dates, id_to_user)
 
