@@ -13,7 +13,7 @@ class EventTimerRepository:
         return EventTimer.query.filter_by(event_id=event_id).first()
 
     @staticmethod
-    def create_timer(event_id: int, round_duration: int = 180) -> EventTimer:
+    def create_timer(event_id: int, round_duration: int = 210) -> EventTimer:
         """Create a new timer for an event"""
         final_round = EventRepository.get_event(event_id).num_rounds
         timer = EventTimer(

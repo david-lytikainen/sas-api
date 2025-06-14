@@ -112,6 +112,16 @@ class SpeedDateMatcher:
                     and (abs(attendee.calculate_age() - match.calculate_age()) <= 5)
                 ]
 
+            if len(compatible_dates) < min_dates_needed:
+                current_app.logger.info(
+                    f"\nStill not enough matches, finding matches at same church"
+                )
+                compatible_dates = [
+                    match
+                    for match in all_opposite_gender
+                    if (abs(attendee.calculate_age() - match.calculate_age()) <= 3)
+                ]
+
             all_compatible_dates[attendee.id] = compatible_dates
             current_app.logger.info(
                 f"\nFinal compatible dates for {attendee.first_name} {attendee.last_name}: {len(compatible_dates)}"
@@ -242,7 +252,7 @@ class SpeedDateMatcher:
                             esd.table_number
                             for esd in event_speed_dates
                             if esd.round_number == current_round - 1
-                            and (esd.male_id == male_id or esd.female_id == female_id)
+                            and (esd.male_id == male_id)
                             and esd.table_number in tables_available_this_round
                         ]
                         previous_table = previous_tables[0] if previous_tables else None
