@@ -252,7 +252,7 @@ class SpeedDateMatcher:
                             esd.table_number
                             for esd in event_speed_dates
                             if esd.round_number == current_round - 1
-                            and (esd.male_id == male_id)
+                            and (esd.female_id == female_id)
                             and esd.table_number in tables_available_this_round
                         ]
                         previous_table = previous_tables[0] if previous_tables else None
