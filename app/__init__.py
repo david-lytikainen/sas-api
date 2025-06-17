@@ -2,10 +2,12 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from limits.strategies import FixedWindowRateLimiter
 from app.extensions import db, migrate, jwt
 from datetime import timedelta
 import logging
-
 # Load environment variables
 load_dotenv()
 
@@ -22,6 +24,9 @@ def create_app():
         "DATABASE_URL", "postgresql://localhost/SAS"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["LIMITER_DATABASE_URI"] = os.getenv(
+        "LIMITER_DATABASE_URL", "postgresql://localhost/SAS"
+    )
 
     # Configure JWT
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your-secret-key")
@@ -29,6 +34,15 @@ def create_app():
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
+    
+    # Implement rate limiting using flask-limiter
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["150 per minute, 10000 per hour, 100000 per day"],
+        storage_uri=os.getenv("LIMITER_DATABASE_URL", "memory://"),
+        strategy="fixed-window",
+    )
 
     # Initialize Flask extensions
     db.init_app(app)
