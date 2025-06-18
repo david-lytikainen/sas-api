@@ -38,6 +38,9 @@ def send_password_reset_email(user):
     msg.body = f"""To reset your password, visit the following link:
 {app.config.get('CLIENT_URL')}/reset-password/{token}
 
-If you did not make this request, ignore this email
+If you did not make this password reset request, please ignore this email.
+
+Thanks!
+The Saved and Single Team
 """
     Thread(target=send_async_email, args=(app, msg)).start() 
