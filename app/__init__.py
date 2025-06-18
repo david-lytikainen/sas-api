@@ -8,6 +8,7 @@ from limits.strategies import FixedWindowRateLimiter
 from app.extensions import db, migrate, jwt
 from datetime import timedelta
 import logging
+
 # Load environment variables
 load_dotenv()
 
@@ -34,7 +35,7 @@ def create_app():
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
-    
+
     # Implement rate limiting using flask-limiter
     limiter = Limiter(
         get_remote_address,
