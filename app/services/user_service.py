@@ -2,10 +2,12 @@ from app.models import User
 from app.models.enums import Gender
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
+from flask import current_app
 from app.repositories import UserRepository
 from datetime import timedelta, datetime
 import logging
 from app.models.church import Church
+from app.utils.email import send_password_reset_email
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -111,3 +113,51 @@ class UserService:
         except Exception as e:
             logger.error(f"Unexpected error during login: {str(e)}")
             raise ValueError("An error occurred during login")
+
+    @staticmethod
+    def forgot_password(email):
+        try:
+            user = UserRepository.find_by_email(email)
+            response = {"message": "If an account with that email exists, a password reset link has been sent."}
+
+            if user:
+                send_password_reset_email(user)
+                logger.info(f"Password reset email sent to {email}")
+                if current_app.testing:
+                    response['reset_token'] = user.reset_token
+            else:
+                logger.warning(
+                    f"Password reset attempted for non-existent email: {email}"
+                )
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error in forgot_password service: {str(e)}")
+            # Even in case of an unexpected error, return a generic message
+            return {"message": "If an account with that email exists, a password reset link has been sent."}
+
+    @staticmethod
+    def reset_password(token, new_password):
+        try:
+            user = User.verify_reset_token(token)
+            if not user:
+                logger.warning("Invalid or expired password reset token received.")
+                raise ValueError("Invalid or expired token")
+
+            # Hash new password
+            hashed_password = generate_password_hash(new_password)
+            user.password = hashed_password
+            user.reset_token = None
+            user.reset_token_expiration = None
+            
+            from app.extensions import db
+            db.session.commit()
+            
+            logger.info(f"Password reset successfully for user: {user.email}")
+            return {"message": "Your password has been reset successfully."}
+        except ValueError as e:
+            logger.error(f"Password reset error: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during password reset: {str(e)}")
+            raise ValueError("An error occurred during password reset")

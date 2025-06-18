@@ -6,6 +6,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from limits.strategies import FixedWindowRateLimiter
 from app.extensions import db, migrate, jwt
+from app.utils.email import mail
 from datetime import timedelta
 import logging
 
@@ -15,6 +16,9 @@ load_dotenv()
 
 def create_app():
     app = Flask(__name__)
+
+    # Set testing mode from environment variable
+    app.config["TESTING"] = os.getenv("FLASK_ENV") in ["development", "testing"]
 
     # Configure logging
     logging.basicConfig(level=logging.INFO)
@@ -36,6 +40,14 @@ def create_app():
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
 
+    # Email configuration
+    app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER')
+    app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+    app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() in ['true', '1', 't']
+    app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+    app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+    app.config['CLIENT_URL'] = os.getenv('CLIENT_URL', 'http://localhost:3000')
+
     # Implement rate limiting using flask-limiter
     limiter = Limiter(
         get_remote_address,
@@ -49,6 +61,7 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+    mail.init_app(app)
 
     # Register blueprints
     from app.routes.user_routes import user_bp
