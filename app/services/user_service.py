@@ -118,14 +118,14 @@ class UserService:
     def forgot_password(email):
         try:
             user = UserRepository.find_by_email(email)
-            response = {"message": "If an account with that email exists, a password reset link has been sent."}
+            response = {"message": "Password reset link has been sent."}
 
             if user:
                 send_password_reset_email(user)
                 logger.info(f"Password reset email sent to {email}")
                 if current_app.testing:
                     response['reset_token'] = user.reset_token
-            else:
+            else:   
                 logger.warning(
                     f"Password reset attempted for non-existent email: {email}"
                 )
@@ -134,7 +134,7 @@ class UserService:
         except Exception as e:
             logger.error(f"Error in forgot_password service: {str(e)}")
             # Even in case of an unexpected error, return a generic message
-            return {"message": "If an account with that email exists, a password reset link has been sent."}
+            return {"message": "Password reset link has been sent."}
 
     @staticmethod
     def reset_password(token, new_password):
