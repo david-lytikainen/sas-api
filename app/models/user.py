@@ -1,7 +1,8 @@
 from app.extensions import db
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from .enums import Gender
-from datetime import datetime
+import secrets
+from flask import current_app
 
 
 class User(db.Model):
@@ -11,6 +12,8 @@ class User(db.Model):
     role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
+    reset_token = db.Column(db.String(255), unique=True, nullable=True)
+    reset_token_expiration = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
     phone = db.Column(db.String(20), nullable=False)
@@ -37,6 +40,25 @@ class User(db.Model):
             - self.birthday.year
             - ((today.month, today.day) < (self.birthday.month, self.birthday.day))
         )
+
+    def get_reset_token(self, expires_sec=1800):
+        self.reset_token = secrets.token_urlsafe(32)
+        self.reset_token_expiration = datetime.now(timezone.utc) + timedelta(
+            seconds=expires_sec
+        )
+        db.session.commit()
+        return self.reset_token
+
+    @staticmethod
+    def verify_reset_token(token):
+        user = User.query.filter_by(reset_token=token).first()
+        if (
+            user
+            and user.reset_token_expiration
+            and user.reset_token_expiration > datetime.now(timezone.utc)
+        ):
+            return user
+        return None
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, User):
