@@ -36,7 +36,7 @@ def send_password_reset_email(user):
 
     msg = Message(
         "Saved & Single Password Reset",
-        sender=("Saved & Single", os.getenv("MAIL_SENDER", os.getenv("MAIL_USERNAME"))),
+        sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
         recipients=[user.email],
     )
     
