@@ -2,6 +2,7 @@ import os
 from flask import current_app, render_template
 from flask_mail import Message, Mail
 from threading import Thread
+from datetime import datetime
 
 mail = Mail()
 
@@ -30,17 +31,20 @@ def send_password_reset_email(user):
         app.logger.info("--- END MOCK EMAIL ---")
         return
 
+    reset_url = f"{app.config.get('CLIENT_URL')}/reset-password/{token}"
+    current_year = datetime.utcnow().year
+
     msg = Message(
-        "Password Reset Request",
-        sender=os.getenv("MAIL_USERNAME"),
+        "Saved & Single Password Reset",
+        sender=("Saved & Single", os.getenv("MAIL_SENDER", os.getenv("MAIL_USERNAME"))),
         recipients=[user.email],
     )
-    msg.body = f"""To reset your password, visit the following link:
-{app.config.get('CLIENT_URL')}/reset-password/{token}
-
-If you did not make this password reset request, please ignore this email.
-
-Thanks!
-The Saved and Single Team
-"""
+    
+    msg.html = render_template(
+        'email/reset_password.html', 
+        user=user, 
+        reset_url=reset_url,
+        current_year=current_year
+    )
+    
     Thread(target=send_async_email, args=(app, msg)).start() 
