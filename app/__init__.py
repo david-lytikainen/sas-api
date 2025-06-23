@@ -41,12 +41,16 @@ def create_app():
     app.config["JWT_HEADER_TYPE"] = "Bearer"
 
     # Email configuration
-    app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER')
-    app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
-    app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() in ['true', '1', 't']
-    app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-    app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-    app.config['CLIENT_URL'] = os.getenv('CLIENT_URL', 'http://localhost:3000')
+    app.config["MAIL_SERVER"] = os.getenv("MAIL_SERVER")
+    app.config["MAIL_PORT"] = int(os.getenv("MAIL_PORT", 587))
+    app.config["MAIL_USE_TLS"] = os.getenv("MAIL_USE_TLS", "true").lower() in [
+        "true",
+        "1",
+        "t",
+    ]
+    app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME")
+    app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
+    app.config["CLIENT_URL"] = os.getenv("CLIENT_URL", "http://localhost:3000")
 
     # Implement rate limiting using flask-limiter
     limiter = Limiter(

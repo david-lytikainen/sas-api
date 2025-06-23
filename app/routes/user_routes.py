@@ -120,7 +120,10 @@ def forgot_password():
         return jsonify(result), 200
     except Exception as e:
         # Generic error to avoid leaking information
-        return jsonify({"error": "An error occurred while processing your request."}), 500
+        return (
+            jsonify({"error": "An error occurred while processing your request."}),
+            500,
+        )
 
 
 @user_bp.route("/reset-password/<token>", methods=["POST"])

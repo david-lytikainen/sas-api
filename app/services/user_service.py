@@ -124,12 +124,12 @@ class UserService:
                 send_password_reset_email(user)
                 logger.info(f"Password reset email sent to {email}")
                 if current_app.testing:
-                    response['reset_token'] = user.reset_token
-            else:   
+                    response["reset_token"] = user.reset_token
+            else:
                 logger.warning(
                     f"Password reset attempted for non-existent email: {email}"
                 )
-            
+
             return response
         except Exception as e:
             logger.error(f"Error in forgot_password service: {str(e)}")
@@ -149,10 +149,11 @@ class UserService:
             user.password = hashed_password
             user.reset_token = None
             user.reset_token_expiration = None
-            
+
             from app.extensions import db
+
             db.session.commit()
-            
+
             logger.info(f"Password reset successfully for user: {user.email}")
             return {"message": "Your password has been reset successfully."}
         except ValueError as e:

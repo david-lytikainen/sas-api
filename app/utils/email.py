@@ -6,6 +6,7 @@ from datetime import datetime
 
 mail = Mail()
 
+
 def send_async_email(app, msg):
     with app.app_context():
         try:
@@ -39,12 +40,12 @@ def send_password_reset_email(user):
         sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
         recipients=[user.email],
     )
-    
+
     msg.html = render_template(
-        'email/reset_password.html', 
-        user=user, 
+        "email/reset_password.html",
+        user=user,
         reset_url=reset_url,
-        current_year=current_year
+        current_year=current_year,
     )
-    
-    Thread(target=send_async_email, args=(app, msg)).start() 
+
+    Thread(target=send_async_email, args=(app, msg)).start()
