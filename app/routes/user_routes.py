@@ -107,3 +107,32 @@ def validate_token():
     except Exception as e:
         print(f"Token validation error: {str(e)}")
         return jsonify({"error": "Invalid or expired token"}), 401
+
+
+@user_bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+    try:
+        data = request.get_json()
+        if not data or "email" not in data:
+            return jsonify({"error": "Email is required"}), 400
+
+        result = UserService.forgot_password(data["email"])
+        return jsonify(result), 200
+    except Exception as e:
+        # Generic error to avoid leaking information
+        return jsonify({"error": "An error occurred while processing your request."}), 500
+
+
+@user_bp.route("/reset-password/<token>", methods=["POST"])
+def reset_password(token):
+    try:
+        data = request.get_json()
+        if not data or "password" not in data:
+            return jsonify({"error": "Password is required"}), 400
+
+        result = UserService.reset_password(token, data["password"])
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": "An unexpected error occurred"}), 500
