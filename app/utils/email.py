@@ -49,3 +49,31 @@ def send_password_reset_email(user):
     )
 
     Thread(target=send_async_email, args=(app, msg)).start()
+
+
+def send_welcome_email(user):
+    app = current_app._get_current_object()
+    client_url = app.config.get("CLIENT_URL")
+    current_year = datetime.utcnow().year
+    if app.testing:
+        app.logger.info("--- MOCK EMAIL ---")
+        app.logger.info(f"To: {user.email}")
+        app.logger.info("Subject: Welcome to Saved & Single!")
+        app.logger.info(f"Body: Welcome to Saved & Single! Visit the following link to get started: {client_url}")
+        app.logger.info("--- END MOCK EMAIL ---")
+        return
+
+    msg = Message(
+        "Welcome to Saved & Single!",
+        sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
+        recipients=[user.email],
+    )
+
+    msg.html = render_template(
+        "email/welcome_email.html",
+        user=user,
+        client_url=client_url,
+        current_year=current_year
+    )
+
+    Thread(target=send_async_email, args=(app, msg)).start()

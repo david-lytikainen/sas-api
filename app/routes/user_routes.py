@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, make_response
 from app.services import UserService
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import User
+from app.utils.email import send_welcome_email
 
 user_bp = Blueprint("user", __name__)
 
@@ -10,7 +11,6 @@ user_bp = Blueprint("user", __name__)
 def sign_up():
     try:
         user_data = request.get_json()
-        print(user_data)
         if not user_data:
             return jsonify({"error": "No data provided"}), 400
 
@@ -38,6 +38,12 @@ def sign_up():
             )
 
         result = UserService.sign_up(user_data)
+        
+        # Send welcome email
+        new_user = User.query.get(result['user']['id'])
+        if new_user:
+            send_welcome_email(new_user)
+            
         return make_response(jsonify(result), 201)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
