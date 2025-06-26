@@ -9,6 +9,7 @@ from app.extensions import db, migrate, jwt
 from app.utils.email import mail
 from datetime import timedelta
 import logging
+import stripe
 
 # Load environment variables
 load_dotenv()
@@ -17,8 +18,10 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
 
-    # Set testing mode from environment variable
-    app.config["TESTING"] = os.getenv("FLASK_ENV") in ["development", "testing"]
+    # Set debug and testing mode from environment variable
+    flask_env = os.getenv("FLASK_ENV", "production")
+    app.config["DEBUG"] = flask_env in ["development", "testing"]
+    app.config["TESTING"] = flask_env in ["development", "testing"]
 
     # Configure logging
     logging.basicConfig(level=logging.INFO)
@@ -51,6 +54,15 @@ def create_app():
     app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME")
     app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
     app.config["CLIENT_URL"] = os.getenv("CLIENT_URL", "http://localhost:3000")
+
+    # Stripe configuration
+    app.config["STRIPE_PUBLISHABLE_KEY"] = os.getenv("STRIPE_PUBLISHABLE_KEY")
+    app.config["STRIPE_SECRET_KEY"] = os.getenv("STRIPE_SECRET_KEY")
+    app.config["STRIPE_WEBHOOK_SECRET"] = os.getenv("STRIPE_WEBHOOK_SECRET")
+    
+    # Initialize Stripe
+    if app.config["STRIPE_SECRET_KEY"]:
+        stripe.api_key = app.config["STRIPE_SECRET_KEY"]
 
     # Implement rate limiting using flask-limiter
     limiter = Limiter(

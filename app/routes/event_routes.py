@@ -11,6 +11,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_req
 from flask_cors import cross_origin
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
+from app.services.payment_service import PaymentService
 from app.services.speed_date_service import SpeedDateService
 from app.services.event_timer_service import EventTimerService
 from datetime import datetime, timedelta, timezone
@@ -179,9 +180,12 @@ def update_event_details_route(event_id):
         return jsonify({"error": "Failed to update event"}), 500
 
 
-@event_bp.route("/events/<int:event_id>/register", methods=["POST"])
+@event_bp.route("/events/<int:event_id>/register", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
 @jwt_required()
 def register_for_event(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
     join_waitlist_param = data.get("join_waitlist", False)
@@ -193,7 +197,11 @@ def register_for_event(event_id):
     # Check if the response contains an error
     if isinstance(response, dict) and "error" in response:
         error_message = response["error"]
-        if "Event is currently full" in error_message:
+        
+        # Handle payment required case
+        if response.get("requires_payment"):
+            return jsonify(response), 402  # Payment Required status code
+        elif "Event is currently full" in error_message:
             return jsonify(response), 409
         elif "Registration is closed for this event" in error_message:
             return jsonify(response), 400
@@ -219,6 +227,7 @@ def register_for_event(event_id):
 @event_bp.route(
     "/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"]
 )
+@cross_origin(supports_credentials=True)
 def cancel_registration(event_id):
     if request.method == "OPTIONS":
         return "", 204
@@ -1794,3 +1803,306 @@ def get_event_waitlist(event_id):
             f"Error retrieving waitlist for event {event_id}: {str(e)}", exc_info=True
         )
         return jsonify({"error": f"Error retrieving waitlist: {str(e)}"}), 500
+
+
+@event_bp.route("/stripe/config", methods=["GET"])
+def get_stripe_config():
+    """Get Stripe publishable key for frontend"""
+    try:
+        config = PaymentService.get_stripe_config()
+        return jsonify(config), 200
+    except Exception as e:
+        current_app.logger.error(f"Error getting Stripe config: {str(e)}")
+        return jsonify({"error": "Unable to get payment configuration"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/create-checkout-session", methods=["POST"])
+@jwt_required()
+def create_checkout_session(event_id):
+    """Create a Stripe checkout session for event registration"""
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Create checkout session
+        result, status_code = PaymentService.create_checkout_session(event_id, current_user_id)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error creating checkout session: {str(e)}")
+        return jsonify({"error": "Unable to create payment session"}), 500
+
+
+@event_bp.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    """Handle Stripe webhook events"""
+    try:
+        payload = request.get_data(as_text=True)
+        signature = request.headers.get("Stripe-Signature")
+        
+        if not signature:
+            current_app.logger.error("Missing Stripe signature")
+            return jsonify({"error": "Missing signature"}), 400
+        
+        result, status_code = PaymentService.handle_webhook_event(payload, signature)
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error handling Stripe webhook: {str(e)}")
+        return jsonify({"error": "Webhook processing failed"}), 500
+
+
+@event_bp.route("/stripe/verify-session/<session_id>", methods=["GET"])
+@jwt_required()
+def verify_payment_session(session_id):
+    """Verify a Stripe payment session"""
+    try:
+        result, status_code = PaymentService.verify_payment_session(session_id)
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error verifying payment session: {str(e)}")
+        return jsonify({"error": "Unable to verify payment"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/create-payment-intent", methods=["POST"])
+@jwt_required()
+def create_payment_intent(event_id):
+    """Create a Stripe PaymentIntent for native payment form"""
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Create PaymentIntent
+        result, status_code = PaymentService.create_payment_intent(event_id, current_user_id)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error creating PaymentIntent: {str(e)}")
+        return jsonify({"error": "Unable to create payment intent"}), 500
+
+
+@event_bp.route("/stripe/payment-intent/<payment_intent_id>", methods=["GET"])
+@jwt_required()
+def get_payment_intent(payment_intent_id):
+    """Retrieve an existing PaymentIntent's client_secret for waitlist payments"""
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Get the PaymentIntent from Stripe to retrieve the client_secret
+        import stripe
+        
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+        
+        # Verify this PaymentIntent belongs to the current user by checking metadata
+        if payment_intent.metadata.get('user_id') != str(current_user_id):
+            return jsonify({"error": "Unauthorized access to payment intent"}), 403
+            
+        return jsonify({
+            "client_secret": payment_intent.client_secret,
+            "status": payment_intent.status,
+            "amount": payment_intent.amount
+        }), 200
+        
+    except stripe.error.InvalidRequestError:
+        return jsonify({"error": "Payment intent not found"}), 404
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving PaymentIntent: {str(e)}")
+        return jsonify({"error": "Failed to retrieve payment intent"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/register-from-waitlist", methods=["POST"])
+@jwt_required()
+def register_from_waitlist_route(event_id):
+    current_user_id = get_jwt_identity()
+    
+    response = EventService.register_from_waitlist(event_id, current_user_id, payment_completed=True)
+    
+    if "error" in response:
+        return jsonify(response), 400
+    else:
+        return jsonify(response), 200
+
+
+# Refund-related routes
+@event_bp.route("/events/<int:event_id>/refund-policy", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def get_refund_policy(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        from app.services.payment_service import PaymentService
+        
+        policy_result, status_code = PaymentService.get_refund_policy_info(event_id)
+        return jsonify(policy_result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error getting refund policy for event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to get refund policy"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/process-refund", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def process_manual_refund(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    # Optional: Allow admin to process refunds for other users
+    target_user_id = data.get('user_id', current_user_id)
+    reason = data.get('reason', 'requested_by_customer')
+    
+    # Check if current user can process refund for target user
+    if target_user_id != current_user_id:
+        current_user = User.query.get(current_user_id)
+        if not current_user or current_user.role_id != UserRole.ADMIN.value:
+            return jsonify({"error": "Unauthorized to process refund for other users"}), 403
+    
+    try:
+        from app.services.payment_service import PaymentService
+        
+        refund_result, status_code = PaymentService.process_refund(event_id, target_user_id, reason)
+        return jsonify(refund_result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error processing refund for user {target_user_id}, event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to process refund"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/payment-info", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def get_payment_info(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    current_user_id = get_jwt_identity()
+    
+    try:
+        from app.services.payment_service import PaymentService
+        
+        payment_info = PaymentService.find_payment_for_registration(event_id, current_user_id)
+        
+        if payment_info:
+            # Remove sensitive information before sending to frontend
+            safe_payment_info = {
+                "has_payment": True,
+                "amount": payment_info.get('amount', 0) / 100,  # Convert from cents
+                "currency": payment_info.get('currency', 'usd'),
+                "status": payment_info.get('status'),
+                "payment_date": payment_info.get('created')
+            }
+            return jsonify(safe_payment_info), 200
+        else:
+            return jsonify({"has_payment": False}), 200
+            
+    except Exception as e:
+        current_app.logger.error(f"Error getting payment info for user {current_user_id}, event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to get payment information"}), 500
+
+
+# Venmo Payment Routes
+@event_bp.route("/events/<int:event_id>/create-venmo-payment-intent", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def create_venmo_payment_intent(event_id):
+    """Create a Stripe PaymentIntent specifically for Venmo payments"""
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Create Venmo PaymentIntent
+        result, status_code = PaymentService.create_venmo_payment_intent(event_id, current_user_id)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error creating Venmo PaymentIntent: {str(e)}")
+        return jsonify({"error": "Unable to create Venmo payment intent"}), 500
+
+
+@event_bp.route("/venmo/confirm-payment/<payment_intent_id>", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def confirm_venmo_payment(payment_intent_id):
+    """Confirm a Venmo payment after user completes payment in Venmo app"""
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        data = request.get_json() or {}
+        venmo_transaction_id = data.get('venmo_transaction_id')
+        
+        result, status_code = PaymentService.confirm_venmo_payment(payment_intent_id, venmo_transaction_id)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error confirming Venmo payment: {str(e)}")
+        return jsonify({"error": "Unable to confirm Venmo payment"}), 500
+
+
+@event_bp.route("/venmo/simulate-payment/<payment_intent_id>", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+def simulate_venmo_payment(payment_intent_id):
+    """Simulate Venmo payment completion for testing purposes"""
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        # Only allow in development mode
+        if not current_app.config.get("DEBUG", False):
+            return jsonify({"error": "Simulation only available in development mode"}), 403
+            
+        result, status_code = PaymentService.simulate_venmo_payment_completion(payment_intent_id)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error simulating Venmo payment: {str(e)}")
+        return jsonify({"error": "Unable to simulate Venmo payment"}), 500
+
+
+@event_bp.route("/venmo/payment-status/<payment_intent_id>", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def get_venmo_payment_status(payment_intent_id):
+    """Get the status of a Venmo payment"""
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Get the PaymentIntent from Stripe to check status
+        import stripe
+        
+        PaymentService._ensure_stripe_key()
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+        
+        # Verify this PaymentIntent belongs to the current user by checking metadata
+        if payment_intent.metadata.get('user_id') != str(current_user_id):
+            return jsonify({"error": "Unauthorized access to payment intent"}), 403
+            
+        return jsonify({
+            "payment_intent_id": payment_intent.id,
+            "status": payment_intent.status,
+            "amount": payment_intent.amount,
+            "currency": payment_intent.currency,
+            "payment_method": payment_intent.metadata.get('payment_method', 'unknown'),
+            "event_id": payment_intent.metadata.get('event_id'),
+            "event_name": payment_intent.metadata.get('event_name')
+        }), 200
+        
+    except stripe.error.InvalidRequestError:
+        return jsonify({"error": "Payment intent not found"}), 404
+    except Exception as e:
+        current_app.logger.error(f"Error getting Venmo payment status: {str(e)}")
+        return jsonify({"error": "Failed to get payment status"}), 500
