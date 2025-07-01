@@ -5,6 +5,7 @@ from app.repositories.user_repository import UserRepository
 from app.repositories.event_repository import EventRepository
 from app.exceptions import UnauthorizedError
 from typing import Dict, Any
+from datetime import datetime, timezone
 
 
 class PaymentService:
@@ -265,6 +266,25 @@ class PaymentService:
         try:
             session = stripe.checkout.Session.retrieve(session_id)
             
+            # If payment is complete, attempt to ensure the user is registered
+            if session.payment_status == "paid":
+                try:
+                    event_id = int(session.metadata.get("event_id")) if session.metadata.get("event_id") else None
+                    user_id = int(session.metadata.get("user_id")) if session.metadata.get("user_id") else None
+
+                    if event_id and user_id:
+                        from app.repositories.event_attendee_repository import EventAttendeeRepository
+                        already_registered = EventAttendeeRepository.find_by_event_and_user(event_id, user_id)
+
+                        if not already_registered:
+                            from app.services.event_service import EventService
+                            current_app.logger.info(
+                                f"verify_payment_session: auto-registering user {user_id} for event {event_id} since payment is paid and no registration found"
+                            )
+                            EventService.register_for_event(event_id, user_id, join_waitlist=False, payment_completed=True)
+                except Exception as e:
+                    current_app.logger.error(f"verify_payment_session: error while auto-registering after payment: {str(e)}")
+
             return {
                 "payment_status": session.payment_status,
                 "session_status": session.status,
@@ -624,36 +644,68 @@ class PaymentService:
 
     @staticmethod
     def get_refund_policy_info(event_id: int) -> Dict[str, Any]:
-        """Get refund policy information for an event"""
+        """Get refund policy information for a specific event"""
         try:
             event = EventRepository.get_event(event_id)
             if not event:
                 return {"error": "Event not found"}, 404
-            
-            # Calculate time until event
-            from datetime import datetime, timezone, timedelta
+
+            # Calculate time until event starts
             now = datetime.now(timezone.utc)
-            time_until_event = event.starts_at - now
-            hours_until_event = time_until_event.total_seconds() / 3600
-            
-            # Define refund policy based on time until event
-            if hours_until_event >= 48:
-                refund_percentage = 100
-                policy_message = "Full refund available until 48 hours before the event."
-            elif hours_until_event >= 24:
-                refund_percentage = 50
-                policy_message = "50% refund available until 24 hours before the event."
-            else:
-                refund_percentage = 0
-                policy_message = "No refunds available within 24 hours of the event."
-            
-            return {
+            event_start = event.starts_at.replace(tzinfo=timezone.utc) if event.starts_at.tzinfo is None else event.starts_at
+            hours_until_event = (event_start - now).total_seconds() / 3600
+
+            # Define refund policy
+            refund_eligible = hours_until_event > 24  # No refunds within 24 hours
+            refund_percentage = 100 if hours_until_event > 72 else 50  # 100% if >72hrs, 50% if 24-72hrs
+
+            policy_info = {
+                "refund_eligible": refund_eligible,
                 "refund_percentage": refund_percentage,
-                "policy_message": policy_message,
-                "hours_until_event": round(hours_until_event, 1),
-                "can_refund": refund_percentage > 0
-            }, 200
-            
+                "hours_until_event": max(0, hours_until_event),
+                "policy_message": PaymentService._get_refund_policy_message(hours_until_event)
+            }
+
+            return policy_info, 200
+
         except Exception as e:
-            current_app.logger.error(f"Error getting refund policy: {str(e)}")
-            return {"error": "Internal server error"}, 500 
+            current_app.logger.error(f"Error getting refund policy for event {event_id}: {str(e)}")
+            return {"error": "Unable to get refund policy"}, 500
+
+    @staticmethod
+    def check_refund_policy(event, registration):
+        """Check if a registration is eligible for refund based on event timing"""
+        try:
+            # Calculate time until event starts
+            now = datetime.now(timezone.utc)
+            event_start = event.starts_at.replace(tzinfo=timezone.utc) if event.starts_at.tzinfo is None else event.starts_at
+            hours_until_event = (event_start - now).total_seconds() / 3600
+
+            # Define refund policy - more generous for testing
+            refund_eligible = hours_until_event > 2  # Allow refunds until 2 hours before event
+            refund_percentage = 100 if hours_until_event > 24 else 75  # 100% if >24hrs, 75% if 2-24hrs
+
+            return {
+                "refund_eligible": refund_eligible,
+                "refund_percentage": refund_percentage,
+                "hours_until_event": max(0, hours_until_event),
+                "policy_message": PaymentService._get_refund_policy_message(hours_until_event)
+            }
+
+        except Exception as e:
+            current_app.logger.error(f"Error checking refund policy: {str(e)}")
+            return {
+                "refund_eligible": False,
+                "refund_percentage": 0,
+                "policy_message": "Unable to determine refund eligibility"
+            }
+
+    @staticmethod
+    def _get_refund_policy_message(hours_until_event: float) -> str:
+        """Get human-readable refund policy message"""
+        if hours_until_event > 24:
+            return "Full refund available (more than 24 hours before event)"
+        elif hours_until_event > 2:
+            return "75% refund available (2-24 hours before event)"
+        else:
+            return "No refund available (less than 2 hours before event)" 

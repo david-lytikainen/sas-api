@@ -1,6 +1,6 @@
 from typing import List
 from app.extensions import db
-from app.models import EventAttendee, User
+from app.models import EventAttendee, User, Event
 from app.models.enums import RegistrationStatus, Gender
 
 
@@ -102,3 +102,35 @@ class EventAttendeeRepository:
             # Log error e
             # current_app.logger.error(f"Error updating registration status for attendee {registration.id}: {str(e)}")
             return None
+
+    @staticmethod
+    def get_pending_payments(event_id: int = None):
+        """Get all attendees with pending payments, optionally filtered by event"""
+        query = (
+            db.session.query(EventAttendee, User, Event)
+            .join(User, EventAttendee.user_id == User.id)
+            .join(Event, EventAttendee.event_id == Event.id)
+            .filter(EventAttendee.payment_status == 'pending')
+        )
+        
+        if event_id:
+            query = query.filter(EventAttendee.event_id == event_id)
+        
+        return query.all()
+
+    @staticmethod
+    def get_attendees_with_payment_info(event_id: int):
+        """Get all attendees for an event with payment status information"""
+        return (
+            db.session.query(EventAttendee, User)
+            .join(User, EventAttendee.user_id == User.id)
+            .filter(
+                EventAttendee.event_id == event_id,
+                EventAttendee.status.in_([
+                    RegistrationStatus.REGISTERED, 
+                    RegistrationStatus.CHECKED_IN, 
+                    RegistrationStatus.PENDING_PAYMENT
+                ])
+            )
+            .all()
+        )

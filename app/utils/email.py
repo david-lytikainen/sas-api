@@ -99,3 +99,46 @@ The Saved & Single Team
 """
 
     Thread(target=send_async_email, args=(app, msg)).start()
+
+
+def send_waitlist_to_event_notification(user, event):
+    """Send email notification when a user moves from waitlist to event registration with pending payment"""
+    app = current_app._get_current_object()
+    
+    # If in testing mode, log the email instead of sending it
+    if app.testing:
+        app.logger.info("--- MOCK WAITLIST TO EVENT EMAIL ---")
+        app.logger.info(f"To: {user.email}")
+        app.logger.info(f"Subject: You're Registered! - {event.name}")
+        app.logger.info(f"Event: {event.name}")
+        app.logger.info(f"Price: ${event.price_per_person}")
+        app.logger.info("Body: You've been moved from waitlist to registered! You'll pay at the event.")
+        app.logger.info("--- END MOCK WAITLIST TO EVENT EMAIL ---")
+        return
+
+    msg = Message(
+        f"You're Registered! - {event.name}",
+        sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
+        recipients=[user.email],
+    )
+
+    # Simple text email for now - you'd want to create an HTML template
+    msg.body = f"""
+Great news, {user.first_name}!
+
+You've been moved from the waitlist and are now registered for "{event.name}"!
+
+Event Details:
+- Date: {event.starts_at.strftime('%B %d, %Y at %I:%M %p')}
+- Location: {event.address}
+- Price: ${event.price_per_person}
+
+Important: You will pay the event fee (${event.price_per_person}) when you arrive at the event. Please bring cash or a card for payment.
+
+Your registration is confirmed, and we look forward to seeing you there!
+
+Thanks!
+The Saved & Single Team
+"""
+
+    Thread(target=send_async_email, args=(app, msg)).start()

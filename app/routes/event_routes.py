@@ -25,159 +25,215 @@ event_bp = Blueprint("event", __name__)
 
 
 @event_bp.route("/events", methods=["GET", "OPTIONS"])
-def get_events():
+@cross_origin(supports_credentials=True)
+def get_all_events():
     if request.method == "OPTIONS":
         return "", 204
 
-    verify_jwt_in_request()
-    user_id = get_jwt_identity()
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_id = get_jwt_identity()
+    except Exception:
+        current_user_id = None
 
-    # Get all events
-    events_data = EventService.get_events_for_user(user_id)
+    events = EventService.get_events()
+    
+    # If user is authenticated, get their registrations and waitlist status
+    user_registrations = {}
+    user_waitlist_status = {}
+    
+    if current_user_id:
+        try:
+            # Get user's registrations
+            registrations = (
+                db.session.query(EventAttendee)
+                .filter(EventAttendee.user_id == current_user_id)
+                .all()
+            )
+            
+            for reg in registrations:
+                user_registrations[reg.event_id] = {
+                    'status': reg.status.value,
+                    'pin': reg.pin,
+                    'registration_date': reg.registration_date.isoformat() if reg.registration_date else None,
+                    'check_in_date': reg.check_in_date.isoformat() if reg.check_in_date else None,
+                    'payment_status': getattr(reg, 'payment_status', 'paid'),  # Default to 'paid' for backward compatibility
+                    'payment_due_date': reg.payment_due_date.isoformat() if getattr(reg, 'payment_due_date', None) else None
+                }
+            
+            # Get user's waitlist status
+            waitlist_entries = (
+                db.session.query(EventWaitlist)
+                .filter(EventWaitlist.user_id == current_user_id)
+                .all()
+            )
+            
+            for entry in waitlist_entries:
+                user_waitlist_status[entry.event_id] = {
+                    'status': 'Waitlisted',
+                    'waitlisted_at': entry.waitlisted_at.isoformat() if entry.waitlisted_at else None
+                }
+                
+        except Exception as e:
+            current_app.logger.error(f"Error fetching user registrations: {str(e)}")
+            # Continue without user-specific data if there's an error
 
-    # Get user's actual registrations
-    user_registrations = EventAttendee.query.filter_by(user_id=user_id).all()
-    registrations_map = {
-        reg.event_id: {
-            "event_id": reg.event_id,
-            "status": reg.status.value,
-            "pin": reg.pin,
-            "registration_date": (
-                reg.registration_date.isoformat() if reg.registration_date else None
-            ),
-            "check_in_date": (
-                reg.check_in_date.isoformat() if reg.check_in_date else None
-            ),
-        }
-        for reg in user_registrations
+    # Convert events to dict format and add user registration info
+    events_data = []
+    for event in events:
+        event_dict = event.to_dict()
+        
+        # Add user's registration info if available
+        if current_user_id:
+            if event.id in user_registrations:
+                event_dict['registration'] = user_registrations[event.id]
+            elif event.id in user_waitlist_status:
+                event_dict['registration'] = user_waitlist_status[event.id]
+        
+        events_data.append(event_dict)
+
+    response_data = {
+        'events': events_data
     }
+    
+    # Add registrations array for backward compatibility
+    if current_user_id:
+        registrations_array = []
+        for event_id, reg_info in user_registrations.items():
+            registrations_array.append({
+                'event_id': event_id,
+                **reg_info
+            })
+        response_data['registrations'] = registrations_array
 
-    # Get user's waitlist entries
-    user_waitlist_entries = EventWaitlist.query.filter_by(user_id=user_id).all()
-    for wl_entry in user_waitlist_entries:
-        if wl_entry.event_id not in registrations_map:
-            registrations_map[wl_entry.event_id] = {
-                "event_id": wl_entry.event_id,
-                "status": RegistrationStatus.WAITLISTED.value,
-                "pin": None,
-                "registration_date": (
-                    wl_entry.waitlisted_at.isoformat()
-                    if wl_entry.waitlisted_at
-                    else None
-                ),
-                "check_in_date": None,
-            }
+    return jsonify(response_data), 200
 
-    final_registrations_data = list(registrations_map.values())
 
-    # Return both events and comprehensive registrations data
-    return jsonify({"events": events_data, "registrations": final_registrations_data})
+@event_bp.route("/events", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def create_event():
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Check if user is admin or organizer
+    if user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
+        return jsonify({"error": "Unauthorized to create events"}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    # Add creator_id to the event data
+    data["creator_id"] = current_user_id
+
+    result = EventService.create_event(data)
+
+    if "error" in result:
+        return jsonify(result), 400
+
+    return jsonify(result), 201
 
 
 @event_bp.route("/events/<int:event_id>", methods=["GET", "OPTIONS"])
 @cross_origin(supports_credentials=True)
-def get_event_by_id(event_id):
+def get_event(event_id):
     if request.method == "OPTIONS":
         return "", 204
 
-    try:
-        verify_jwt_in_request()
-        user_id = get_jwt_identity()
+    event = EventService.get_event(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
 
-        # Get the specific event
-        event = Event.query.get_or_404(event_id)
-        event_data = event.to_dict()
-
-        # Check if user is registered for this event
-        registration = EventAttendee.query.filter_by(
-            user_id=user_id, event_id=event_id
-        ).first()
-
-        if registration:
-            registration_data = {
-                "status": registration.status.value,
-                "pin": registration.pin,
-                "registration_date": (
-                    registration.registration_date.isoformat()
-                    if registration.registration_date
-                    else None
-                ),
-                "check_in_date": (
-                    registration.check_in_date.isoformat()
-                    if registration.check_in_date
-                    else None
-                ),
-            }
-            event_data["registration"] = registration_data
-
-        return jsonify(event_data)
-    except Exception as e:
-        print(f"Error fetching event {event_id}: {str(e)}")
-        return jsonify({"error": "Failed to fetch event details"}), 500
-
-
-@event_bp.route("/events/create", methods=["POST"])
-@jwt_required()
-def create_event():
-    current_user_id = get_jwt_identity()
-    data = request.get_json()
-
-    try:
-        event = EventService.create_event(data, current_user_id)
-        return jsonify(event.to_dict()), 201
-    except MissingFieldsError as e:
-        return (
-            jsonify({"error": "Missing required fields", "missing_fields": e.fields}),
-            400,
-        )
-    except UnauthorizedError:
-        return jsonify({"error": "Unauthorized"}), 403
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error creating event: {str(e)}")
-        return jsonify({"error": f"Failed to create event: {e}"}), 500
+    return jsonify(event.to_dict()), 200
 
 
 @event_bp.route("/events/<int:event_id>", methods=["PUT", "OPTIONS"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
-def update_event_details_route(event_id):
+def update_event(event_id):
     if request.method == "OPTIONS":
         return "", 204
 
     current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Get the event to check permissions
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    # Check if user can edit this event
+    is_admin = user.role_id == UserRole.ADMIN.value
+    is_event_creator = (
+        user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+    )
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to edit this event"}), 403
+
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Request body must be JSON"}), 400
+        return jsonify({"error": "No data provided"}), 400
 
-    try:
-        updated_event, message, status_code = EventService.update_event(
-            event_id, data, current_user_id
-        )
-        if updated_event:
-            return (
-                jsonify(
-                    {"message": message["message"], "event": updated_event.to_dict()}
-                ),
-                status_code,
-            )
-        else:
-            return jsonify(message), status_code  # Error message from service
-    except UnauthorizedError as e:
-        return jsonify({"error": str(e)}), 403
-    except (
-        MissingFieldsError
-    ) as e:  # Should not be hit if service handles this, but good practice
+    updated_event, response_body, status_code = EventService.update_event(event_id, data, current_user_id)
+
+    return jsonify(response_body), status_code
+
+
+@event_bp.route("/events/<int:event_id>", methods=["DELETE", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def delete_event(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Get the event to check permissions
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    # Check if user can delete this event
+    is_admin = user.role_id == UserRole.ADMIN.value
+    is_event_creator = (
+        user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+    )
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to delete this event"}), 403
+
+    # Check if event can be safely deleted (no registrations or in progress)
+    if event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]:
         return (
-            jsonify({"error": "Missing required fields", "missing_fields": e.fields}),
+            jsonify(
+                {
+                    "error": "Cannot delete events that are in progress or completed"
+                }
+            ),
             400,
         )
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(
-            f"Error updating event {event_id}: {str(e)}", exc_info=True
-        )
-        return jsonify({"error": "Failed to update event"}), 500
+
+    result = EventService.delete_event(event_id)
+
+    if "error" in result:
+        return jsonify(result), 400
+
+    return jsonify(result), 200
 
 
 @event_bp.route("/events/<int:event_id>/register", methods=["POST", "OPTIONS"])
@@ -189,6 +245,12 @@ def register_for_event(event_id):
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
     join_waitlist_param = data.get("join_waitlist", False)
+
+    # Check if this is a retry after cancellation
+    force_registration = data.get("force_registration", False)
+    if force_registration:
+        current_app.logger.info(f"Force registration requested for user {current_user_id}, event {event_id}")
+        EventService.cleanup_user_registration_conflicts(event_id, current_user_id)
 
     response = EventService.register_for_event(
         event_id, current_user_id, join_waitlist=join_waitlist_param
@@ -224,172 +286,192 @@ def register_for_event(event_id):
     )
 
 
-@event_bp.route(
-    "/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"]
-)
+@event_bp.route("/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"])
 @cross_origin(supports_credentials=True)
+@jwt_required()
 def cancel_registration(event_id):
     if request.method == "OPTIONS":
         return "", 204
 
-    verify_jwt_in_request()
-    user_id = get_jwt_identity()
-    response = EventService.cancel_registration(event_id, user_id)
-    return jsonify(response)
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    process_refund = data.get("process_refund", True)
 
-
-@event_bp.route("/events/<int:event_id>/generate/schedules", methods=["POST"])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def generate_schedules(event_id):
     try:
-        current_user_id = get_jwt_identity()
-        current_user = User.query.get(current_user_id)
-        event = Event.query.get_or_404(event_id)
+        current_app.logger.info(f"Cancel registration request: user_id={current_user_id}, event_id={event_id}, process_refund={process_refund}")
+        response = EventService.cancel_registration(event_id, current_user_id, process_refund)
+        current_app.logger.info(f"Cancel registration response: {response}")
 
-        data = request.get_json() or {}
-        num_tables = data.get("num_tables", 15)
-        num_rounds = data.get("num_rounds", 15)
+        # Check if this is a registration cancellation failure (top-level error)
+        if "error" in response and "message" not in response:
+            current_app.logger.error(f"Cancel registration error: {response['error']}")
+            return jsonify(response), 400
 
-        try:
-            num_tables = int(num_tables)
-            num_rounds = int(num_rounds)
+        # If we have a message, the cancellation succeeded (even if refund failed)
+        if "message" in response:
+            # Log refund issues but still return success for cancellation
+            if response.get("refund_info", {}).get("refund_error"):
+                current_app.logger.warning(f"Registration cancelled but refund failed: {response['refund_info']['refund_error']}")
+            return jsonify(response), 200
 
-            if num_tables < 1 or num_rounds < 1:
-                return (
-                    jsonify(
-                        {
-                            "error": "Number of tables and rounds must be positive integers"
-                        }
-                    ),
-                    400,
-                )
-        except (ValueError, TypeError):
-            return (
-                jsonify(
-                    {"error": "Invalid input for tables or rounds, must be integers"}
-                ),
-                400,
-            )
-
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({"error": "Unauthorized"}), 403
-        if event.status != EventStatus.REGISTRATION_OPEN.value:
-            return (
-                jsonify(
-                    {"error": "Event cannot be started (must be Registration Open)"}
-                ),
-                400,
-            )
-
-        num_rounds_actual, num_tables_actual = SpeedDateService.generate_schedule(
-            event_id, num_tables, num_rounds
-        )
-
-        if num_rounds_actual > 0:
-            event.status = EventStatus.IN_PROGRESS.value
-            event.num_rounds = num_rounds_actual
-            event.num_tables = num_tables_actual
-            db.session.commit()
-            EventTimerService.delete_timer(event_id)
-            EventTimerService.create_timer(event_id)
-            current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
-            return jsonify({"message": "Event schedule generated"})
-        else:
-            current_app.logger.warning(f"Event {event_id} schedule generation failed")
-            return jsonify({"message": "Event schedule could not be generated."})
+        # Fallback for unexpected response format
+        current_app.logger.error(f"Unexpected response format: {response}")
+        return jsonify({"error": "Unexpected response from cancellation service"}), 500
 
     except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(
-            f"Error starting event {event_id}: {str(e)}", exc_info=True
-        )
-        return jsonify({"error": "Failed to start event"}), 500
+        current_app.logger.error(f"Cancel registration exception: {str(e)}", exc_info=True)
+        return jsonify({"error": "Failed to cancel registration"}), 500
 
 
-@event_bp.route("/events/<int:event_id>/check-in", methods=["POST"])
+@event_bp.route("/events/<int:event_id>/check-in", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
 @jwt_required()
-def check_in(event_id):
+def check_in_to_event(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
     current_user_id = get_jwt_identity()
     data = request.get_json()
 
     if not data or "pin" not in data:
-        return jsonify({"error": "Missing PIN"}), 400
+        return jsonify({"error": "PIN is required"}), 400
 
     pin = data["pin"]
 
-    response, status_code = EventService.check_in(event_id, current_user_id, pin)
-    return jsonify(response), status_code
+    # Find the user's registration
+    registration = EventAttendee.query.filter_by(
+        event_id=event_id, user_id=current_user_id
+    ).first()
+
+    if not registration:
+        return jsonify({"error": "You are not registered for this event"}), 400
+
+    if registration.status == RegistrationStatus.CHECKED_IN:
+        return jsonify({"error": "You are already checked in"}), 400
+
+    if registration.pin != pin:
+        return jsonify({"error": "Invalid PIN"}), 400
+
+    # Update registration status to checked in
+    registration.status = RegistrationStatus.CHECKED_IN
+    registration.check_in_date = datetime.now(timezone.utc)
+
+    try:
+        db.session.commit()
+        return jsonify({"message": "Successfully checked in to event"}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error checking in user {current_user_id} to event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to check in"}), 500
 
 
-@event_bp.route("/events/<int:event_id>/status", methods=["PATCH", "OPTIONS"])
+@event_bp.route("/events/<int:event_id>/status", methods=["PUT", "OPTIONS"])
 @cross_origin(supports_credentials=True)
+@jwt_required()
 def update_event_status(event_id):
     if request.method == "OPTIONS":
         return "", 204
 
-    verify_jwt_in_request()
     current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Get the event to check permissions
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    # Check if user can update this event's status
+    is_admin = user.role_id == UserRole.ADMIN.value
+    is_event_creator = (
+        user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+    )
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to update event status"}), 403
+
     data = request.get_json()
-
-    # Validate the request
     if not data or "status" not in data:
-        return jsonify({"error": "Missing status"}), 400
+        return jsonify({"error": "Status is required"}), 400
 
-    status = data["status"]
+    new_status = data["status"]
+
+    # Validate status
+    valid_statuses = [status.value for status in EventStatus]
+    if new_status not in valid_statuses:
+        return jsonify({"error": f"Invalid status. Must be one of: {valid_statuses}"}), 400
+
+    # Update event status
+    event.status = new_status
+    event.updated_at = datetime.now(timezone.utc)
 
     try:
-        # Validate status values
-        valid_statuses = [status.value for status in EventStatus]
-        if status not in valid_statuses:
-            return (
-                jsonify(
-                    {
-                        "error": f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-                    }
-                ),
-                400,
-            )
-
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-
-        # Get the user with role preloaded to avoid lazy loading issues
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        # Check if user has permission to update the event
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
-            return jsonify({"error": "Unauthorized to update this event"}), 403
-
-        # Store the current status before changing it
-        original_status = event.status
-
-        # Check if status is actually changing
-        if original_status == status:
-            return (
-                jsonify({"message": "Event status is already " + status}),
-                200,
-            )  # Or maybe 304 Not Modified
-
-        # Now we can directly assign the status string
-        event.status = status
         db.session.commit()
-        current_app.logger.info(
-            f"Successfully updated event {event_id} status from '{original_status}' to '{status}'"
-        )
         return jsonify({"message": "Event status updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
-        print(f"Error in update_event_status: {str(e)}")
-        return jsonify({"error": f"Error updating status: {str(e)}"}), 500
+        current_app.logger.error(f"Error updating event {event_id} status: {str(e)}")
+        return jsonify({"error": "Failed to update event status"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/start", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def start_event(event_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Get the event to check permissions
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    # Check if user can start this event
+    is_admin = user.role_id == UserRole.ADMIN.value
+    is_event_creator = (
+        user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+    )
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to start this event"}), 403
+
+    # Get num_tables and num_rounds from request
+    data = request.get_json() or {}
+    num_tables = data.get("num_tables", 10)
+    num_rounds = data.get("num_rounds", 10)
+
+    try:
+        # Update event status to in progress
+        event.status = EventStatus.IN_PROGRESS.value
+        event.num_tables = num_tables
+        event.num_rounds = num_rounds
+        event.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        # Generate speed dating schedules
+        from app.services.speed_date_service import SpeedDateService
+        result = SpeedDateService.generate_schedules(event_id, num_tables, num_rounds)
+
+        if "error" in result:
+            # Revert event status if schedule generation fails
+            event.status = EventStatus.REGISTRATION_OPEN.value
+            db.session.commit()
+            return jsonify(result), 400
+
+        return jsonify({"message": "Event started successfully", "schedules": result}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error starting event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to start event"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/attendee-pins", methods=["GET", "OPTIONS"])
@@ -427,7 +509,7 @@ def get_event_attendee_pins(event_id):
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(
-                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN, RegistrationStatus.PENDING_PAYMENT]
                 ),
             )
             .all()
@@ -439,6 +521,7 @@ def get_event_attendee_pins(event_id):
                 "email": user.email,
                 "pin": attendee.pin,
                 "status": attendee.status.value if attendee.status else None,
+                "payment_status": getattr(attendee, 'payment_status', 'paid'),
             }
             for attendee, user in attendees
         ]
@@ -485,7 +568,7 @@ def get_event_attendees(event_id):
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(
-                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN, RegistrationStatus.PENDING_PAYMENT]
                 ),
             )
             .all()
@@ -515,6 +598,12 @@ def get_event_attendees(event_id):
                 ),
                 "status": attendee.status.value,
                 "pin": attendee.pin,
+                "payment_status": getattr(attendee, 'payment_status', 'paid'),
+                "payment_due_date": (
+                    attendee.payment_due_date.isoformat()
+                    if getattr(attendee, 'payment_due_date', None)
+                    else None
+                ),
             }
             for attendee, user, church in attendees
         ]
@@ -525,358 +614,135 @@ def get_event_attendees(event_id):
         return jsonify({"error": f"Error retrieving attendees: {str(e)}"}), 500
 
 
-@event_bp.route(
-    "/events/<int:event_id>/attendees/<int:attendee_id>", methods=["PATCH", "OPTIONS"]
-)
-@cross_origin(supports_credentials=True)
-def update_attendee_details(event_id, attendee_id):
-    if request.method == "OPTIONS":
-        return "", 204
-
-    verify_jwt_in_request()
-    current_user_id = get_jwt_identity()
-
-    try:
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-
-        # Get the user and verify permissions
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        # Check if user has permission to update attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
-            return (
-                jsonify({"error": "Unauthorized to update attendee information"}),
-                403,
-            )
-
-        # Get request data
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No update data provided"}), 400
-
-        # Get the user to update
-        user_to_update = User.query.get_or_404(attendee_id)
-
-        # Also verify this user is actually registered for this event
-        attendee = EventAttendee.query.filter_by(
-            event_id=event_id, user_id=attendee_id
-        ).first()
-        if not attendee:
-            return jsonify({"error": "User is not registered for this event"}), 404
-
-        # Track which fields were updated
-        updated_fields = []
-
-        # Update user fields if provided
-        if "first_name" in data and data["first_name"]:
-            user_to_update.first_name = data["first_name"]
-            updated_fields.append("first_name")
-
-        if "last_name" in data and data["last_name"]:
-            user_to_update.last_name = data["last_name"]
-            updated_fields.append("last_name")
-
-        if "email" in data and data["email"]:
-            user_to_update.email = data["email"]
-            updated_fields.append("email")
-
-        if "phone" in data and data["phone"]:
-            user_to_update.phone = data["phone"]
-            updated_fields.append("phone")
-
-        if "gender" in data and data["gender"]:
-            try:
-                user_to_update.gender = Gender[data["gender"].upper()]
-                updated_fields.append("gender")
-            except KeyError:
-                return (
-                    jsonify(
-                        {"error": "Invalid gender value. Must be either MALE or FEMALE"}
-                    ),
-                    400,
-                )
-
-        if "birthday" in data and data["birthday"]:
-            try:
-                user_to_update.birthday = datetime.strptime(
-                    data["birthday"], "%Y-%m-%d"
-                ).date()
-                updated_fields.append("birthday")
-            except ValueError:
-                return (
-                    jsonify({"error": "Invalid birthday format. Use YYYY-MM-DD"}),
-                    400,
-                )
-        if "church" in data and data["church"]:
-            try:
-                church_input = data["church"]
-                church = None
-
-                # Try to parse as integer first (church ID)
-                try:
-                    church_id = int(church_input)
-                    church = Church.query.get(church_id)
-                except (ValueError, TypeError):
-                    # If it's not an integer, treat it as a church name
-                    church = Church.query.filter_by(name=church_input).first()
-
-                if church:
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
-                else:
-                    # If church not found, create a new one
-                    church = Church(name=church_input)
-                    db.session.add(church)
-                    db.session.commit()
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
-
-            except Exception as e:
-                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-
-        # Update attendee fields
-        if "pin" in data and data["pin"]:
-            attendee.pin = data["pin"]
-            updated_fields.append("pin")
-
-        # Save changes if any fields were updated
-        if updated_fields:
-            db.session.commit()
-
-            # Refresh the user_to_update object to get the latest church data
-            db.session.refresh(user_to_update)
-
-            # Get updated attendee data to return to frontend
-            church_name = "Other"
-            if user_to_update.church_id:
-                church = Church.query.get(user_to_update.church_id)
-                if church:
-                    church_name = church.name
-
-            updated_attendee_data = {
-                "id": user_to_update.id,
-                "name": f"{user_to_update.first_name} {user_to_update.last_name}",
-                "email": user_to_update.email,
-                "first_name": user_to_update.first_name,
-                "last_name": user_to_update.last_name,
-                "birthday": (
-                    user_to_update.birthday.isoformat()
-                    if user_to_update.birthday
-                    else None
-                ),
-                "age": user_to_update.calculate_age(),
-                "gender": (
-                    user_to_update.gender.value if user_to_update.gender else None
-                ),
-                "phone": user_to_update.phone,
-                "church": church_name,
-                "pin": attendee.pin,
-            }
-
-            return (
-                jsonify(
-                    {
-                        "message": "Attendee details updated successfully",
-                        "updated_fields": updated_fields,
-                        "attendee": updated_attendee_data,
-                    }
-                ),
-                200,
-            )
-        else:
-            return jsonify({"message": "No fields were updated"}), 200
-
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error updating attendee details: {str(e)}")
-        return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
-
-
-@event_bp.route(
-    "/events/<int:event_id>/waitlist/<int:user_id>", methods=["PATCH", "OPTIONS"]
-)
+@event_bp.route("/events/<int:event_id>/pending-payments", methods=["GET", "OPTIONS"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
-def update_waitlist_attendee_details(event_id, user_id):
+def get_event_pending_payments(event_id):
+    """Get all attendees with pending payments for a specific event"""
     if request.method == "OPTIONS":
         return "", 204
 
-    verify_jwt_in_request()
     current_user_id = get_jwt_identity()
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "User not found"}), 403
+
+    # Check if user has permission to view pending payments
+    event = Event.query.get_or_404(event_id)
+    is_admin = current_user.role_id == UserRole.ADMIN.value
+    is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to view pending payments"}), 403
 
     try:
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-
-        # Get the user and verify permissions
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        # Check if user has permission to update attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
-            return (
-                jsonify(
-                    {"error": "Unauthorized to update waitlist attendee information"}
-                ),
-                403,
-            )
-
-        # Get request data
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No update data provided"}), 400
-
-        # Get the user to update
-        user_to_update = User.query.get_or_404(user_id)
-
-        # Also verify this user is actually waitlisted for this event
-        waitlist_entry = EventWaitlist.query.filter_by(
-            event_id=event_id, user_id=user_id
-        ).first()
-        if not waitlist_entry:
-            return jsonify({"error": "User is not waitlisted for this event"}), 404
-
-        # Track which fields were updated
-        updated_fields = []
-
-        # Update user fields if provided
-        if "first_name" in data and data["first_name"]:
-            user_to_update.first_name = data["first_name"]
-            updated_fields.append("first_name")
-
-        if "last_name" in data and data["last_name"]:
-            user_to_update.last_name = data["last_name"]
-            updated_fields.append("last_name")
-
-        if "email" in data and data["email"]:
-            user_to_update.email = data["email"]
-            updated_fields.append("email")
-
-        if "phone" in data and data["phone"]:
-            user_to_update.phone = data["phone"]
-            updated_fields.append("phone")
-
-        if "gender" in data and data["gender"]:
-            try:
-                user_to_update.gender = Gender[data["gender"].upper()]
-                updated_fields.append("gender")
-            except KeyError:
-                return (
-                    jsonify(
-                        {"error": "Invalid gender value. Must be either MALE or FEMALE"}
-                    ),
-                    400,
-                )
-        if "birthday" in data and data["birthday"]:
-            try:
-                user_to_update.birthday = datetime.strptime(
-                    data["birthday"], "%Y-%m-%d"
-                ).date()
-                updated_fields.append("birthday")
-            except (ValueError, TypeError):
-                return (
-                    jsonify(
-                        {"error": "Invalid birthday format. Use YYYY-MM-DD string"}
-                    ),
-                    400,
-                )
-        if "church" in data and data["church"]:
-            try:
-                church_input = data["church"]
-                church = None
-
-                if isinstance(church_input, int):
-                    church = Church.query.get(church_input)
-                elif isinstance(church_input, str):
-                    church = Church.query.filter_by(name=church_input).first()
-                    if not church and church_input:
-                        church = Church(name=church_input)
-                        db.session.add(church)
-                        db.session.flush()
-
-                if church:
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
-                elif not church_input:
-                    user_to_update.church_id = None
-                    updated_fields.append("church")
-
-            except Exception as e:
-                current_app.logger.error(
-                    f"Error updating church for waitlist user {user_id} in event {event_id}: {str(e)}"
-                )
-                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-
-        # Save changes if any fields were updated
-        if updated_fields:
-            db.session.commit()
-
-            # Refresh the user_to_update object to get the latest church data
-            db.session.refresh(user_to_update)
-
-            # Get updated attendee data to return to frontend
-            church_name = "Other"
-            if user_to_update.church_id:
-                church = Church.query.get(user_to_update.church_id)
-                if church:
-                    church_name = church.name
-
-            # Construct the user part of the response
-            response_user_data = {
-                "id": user_to_update.id,
-                "name": f"{user_to_update.first_name} {user_to_update.last_name}",
-                "email": user_to_update.email,
-                "first_name": user_to_update.first_name,
-                "last_name": user_to_update.last_name,
-                "birthday": (
-                    user_to_update.birthday.isoformat()
-                    if user_to_update.birthday
-                    else None
-                ),
-                "age": user_to_update.calculate_age(),
-                "gender": (
-                    user_to_update.gender.value if user_to_update.gender else None
-                ),
-                "phone": user_to_update.phone,
-                "church": church_name,
+        pending_payments = EventService.get_pending_payments(event_id)
+        
+        payment_data = [
+            {
+                "id": user.id,
+                "name": f"{user.first_name} {user.last_name}",
+                "email": user.email,
+                "phone": user.phone,
+                "event_name": event.name,
+                "amount_due": float(event.price_per_person),
+                "registration_date": attendee.registration_date.isoformat() if attendee.registration_date else None,
+                "payment_due_date": attendee.payment_due_date.isoformat() if attendee.payment_due_date else None,
+                "status": attendee.status.value,
+                "pin": attendee.pin,
             }
+            for attendee, user, event in pending_payments
+        ]
 
-            return (
-                jsonify(
-                    {
-                        "message": "Waitlist user details updated successfully",
-                        "updated_fields": updated_fields,
-                        "user": response_user_data,
-                    }
-                ),
-                200,
-            )
-        else:
-            return jsonify({"message": "No fields were updated"}), 200
-
+        return jsonify(payment_data), 200
     except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(
-            f"Error updating waitlist user {user_id} in event {event_id}: {str(e)}",
-            exc_info=True,
-        )
-        return jsonify({"error": f"Error updating waitlist user: {str(e)}"}), 500
+        current_app.logger.error(f"Error getting pending payments for event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to retrieve pending payments"}), 500
+
+
+@event_bp.route("/pending-payments", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def get_all_pending_payments():
+    """Get all attendees with pending payments across all events"""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "User not found"}), 403
+
+    # Check if user is admin (only admins can see all pending payments)
+    if current_user.role_id != UserRole.ADMIN.value:
+        return jsonify({"error": "Unauthorized - admin access required"}), 403
+
+    try:
+        pending_payments = EventService.get_pending_payments()
+        
+        payment_data = [
+            {
+                "id": user.id,
+                "name": f"{user.first_name} {user.last_name}",
+                "email": user.email,
+                "phone": user.phone,
+                "event_id": event.id,
+                "event_name": event.name,
+                "amount_due": float(event.price_per_person),
+                "registration_date": attendee.registration_date.isoformat() if attendee.registration_date else None,
+                "payment_due_date": attendee.payment_due_date.isoformat() if attendee.payment_due_date else None,
+                "status": attendee.status.value,
+                "pin": attendee.pin,
+            }
+            for attendee, user, event in pending_payments
+        ]
+
+        return jsonify(payment_data), 200
+    except Exception as e:
+        current_app.logger.error(f"Error getting all pending payments: {str(e)}")
+        return jsonify({"error": "Failed to retrieve pending payments"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/mark-payment-completed", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def mark_payment_completed(event_id):
+    """Mark a pending payment as completed"""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    current_user_id = get_jwt_identity()
+    current_user = User.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "User not found"}), 403
+
+    # Check if user has permission to mark payments as completed
+    event = Event.query.get_or_404(event_id)
+    is_admin = current_user.role_id == UserRole.ADMIN.value
+    is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and event.creator_id == current_user_id
+
+    if not is_admin and not is_event_creator:
+        return jsonify({"error": "Unauthorized to mark payments as completed"}), 403
+
+    data = request.get_json()
+    if not data or "user_id" not in data:
+        return jsonify({"error": "User ID is required"}), 400
+
+    user_id = data["user_id"]
+
+    try:
+        result = EventService.mark_payment_completed(event_id, user_id)
+        
+        if "error" in result:
+            return jsonify(result), 400
+        
+        return jsonify(result), 200
+    except Exception as e:
+        current_app.logger.error(f"Error marking payment completed for user {user_id}, event {event_id}: {str(e)}")
+        return jsonify({"error": "Failed to mark payment as completed"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/schedule", methods=["GET"])
@@ -1892,12 +1758,38 @@ def get_payment_intent(payment_intent_id):
         # Get the PaymentIntent from Stripe to retrieve the client_secret
         import stripe
         
+        # Ensure Stripe API key is set
+        PaymentService._ensure_stripe_key()
+        
         payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
         
         # Verify this PaymentIntent belongs to the current user by checking metadata
         if payment_intent.metadata.get('user_id') != str(current_user_id):
             return jsonify({"error": "Unauthorized access to payment intent"}), 403
-            
+
+        # If payment succeeded but user is not yet registered, register now
+        if payment_intent.status == 'succeeded':
+            try:
+                event_id_meta = payment_intent.metadata.get('event_id')
+                if event_id_meta:
+                    from app.repositories.event_attendee_repository import EventAttendeeRepository
+                    event_id_int = int(event_id_meta)
+                    already = EventAttendeeRepository.find_by_event_and_user(event_id_int, current_user_id)
+                    if not already:
+                        from app.services.event_service import EventService
+                        current_app.logger.info(f"Auto-registering user {current_user_id} for event {event_id_int} after successful PaymentIntent fetch")
+                        result = EventService.register_for_event(event_id_int, current_user_id, join_waitlist=False, payment_completed=True)
+                        if "error" in result:
+                            current_app.logger.error(f"Auto-registration failed for user {current_user_id}, event {event_id_int}: {result['error']}")
+                        else:
+                            current_app.logger.info(f"Auto-registration successful for user {current_user_id}, event {event_id_int}: {result}")
+                    else:
+                        current_app.logger.info(f"User {current_user_id} already registered for event {event_id_int}, skipping auto-registration")
+                else:
+                    current_app.logger.warning(f"No event_id found in PaymentIntent {payment_intent_id} metadata")
+            except Exception as e:
+                current_app.logger.error(f"Error auto-registering after PaymentIntent fetch: {str(e)}", exc_info=True)
+
         return jsonify({
             "client_secret": payment_intent.client_secret,
             "status": payment_intent.status,
