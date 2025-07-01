@@ -15,6 +15,11 @@ class EventAttendee(db.Model):
         db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
     )
     check_in_date = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
+    
+    # Payment tracking fields
+    payment_status = db.Column(db.String(20), nullable=False, default='paid')
+    payment_due_date = db.Column(db.TIMESTAMP(timezone=True), nullable=True)
+    
     updated_at = db.Column(
         db.TIMESTAMP(timezone=True),
         nullable=False,
@@ -33,6 +38,8 @@ class EventAttendee(db.Model):
             f"user_id={self.user_id}, "
             f"status={self.status}, "
             f"pin={self.pin}, "
+            f"payment_status={self.payment_status}, "
+            f"payment_due_date={self.payment_due_date}, "
             f"registration_date={self.registration_date}, "
             f"check_in_date={self.check_in_date}, "
             f"updated_at={self.updated_at}, "

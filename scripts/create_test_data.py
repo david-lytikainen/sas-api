@@ -16,7 +16,7 @@ from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
 from random import randrange
 from werkzeug.security import generate_password_hash
-from create_admin import create_admin_user
+from scripts.create_admin import create_admin_user
 from app.models.church import Church
 from app.services.event_service import EventService
 
@@ -98,21 +98,76 @@ def random_birthday(min_age, max_age):
     return random_date.date()
 
 
-def create_test_event(creator_id):
-    """Create a test event for speed dating"""
+def create_direct_attendee(event, user):
+    """Directly create an attendee record bypassing all payment and capacity checks"""
+    from app.repositories.event_attendee_repository import EventAttendeeRepository
+    from app.repositories.event_waitlist_repository import EventWaitlistRepository
+    import random
+    
+    # Check current capacity to decide between registration and waitlist
+    attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
+        event.id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+    )
+    
+    # Check gender capacity
+    same_gender_count = EventAttendeeRepository.count_by_event_and_status_and_gender(
+        event.id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN], user.gender
+    )
+    
+    # Determine if we should register or waitlist
+    event_full = attendee_count >= event.max_capacity
+    gender_full = same_gender_count >= (event.max_capacity * 0.6)
+    
+    if event_full or gender_full:
+        # Add to waitlist
+        try:
+            EventWaitlistRepository.add_to_waitlist(event.id, user.id)
+            return {"message": "Successfully added to waitlist"}
+        except Exception as e:
+            return {"error": f"Failed to add to waitlist: {str(e)}"}
+    else:
+        # Register directly
+        pin = "".join(random.choices("0123456789", k=4))
+        try:
+            EventAttendeeRepository.register_for_event({
+                "event_id": event.id,
+                "user_id": user.id,
+                "status": RegistrationStatus.REGISTERED,
+                "pin": pin,
+            })
+            return {"message": "Successfully registered for event"}
+        except Exception as e:
+            return {"error": f"Failed to register: {str(e)}"}
+
+
+def create_test_event(creator_id, event_type="paid"):
+    """Create a test event for speed dating
+    
+    Args:
+        creator_id: ID of the user creating the event
+        event_type: "paid", "free", or "both" - determines pricing
+    """
 
     # Set event time (example: event tomorrow at 7pm)
     tomorrow = datetime.now() + timedelta(days=1)
     starts_at = tomorrow.replace(hour=19, minute=0, second=0, microsecond=0)
 
+    # Determine pricing based on event_type
+    if event_type == "free":
+        price = Decimal("0.00")
+        name = "Free Test Speed Dating Night"
+    else:  # "paid" or default
+        price = Decimal("25.00")
+        name = "Test Speed Dating Night"
+
     test_event = Event(
         creator_id=creator_id,
         starts_at=starts_at,
         address="123 Test Street, Test City, TS 12345",
-        name="Test Speed Dating Night",
+        name=name,
         max_capacity=5,  # Reduced max_capacity to test waitlist
         status="Registration Open",  # Changed to Registration Open to allow registrations
-        price_per_person=Decimal("25.00"),
+        price_per_person=price,
         registration_deadline=starts_at - timedelta(hours=2),
         description="Test speed dating event for singles aged 22-30",
         num_tables=10,
@@ -129,23 +184,39 @@ def create_test_event(creator_id):
     return test_event
 
 
-def create_test_attendees(test_users, test_event):
-    """Create event attendees from our test users"""
+def create_test_attendees(test_users, test_event, bypass_payment=True):
+    """Create event attendees from our test users
+    
+    Args:
+        test_users: List of User objects to register
+        test_event: Event object to register users for
+        bypass_payment: If True, bypass payment requirements (default: True)
+    """
     print(
         f"Attempting to register {len(test_users)} users for event '{test_event.name}' (ID: {test_event.id}) with max capacity {test_event.max_capacity}..."
     )
+    if bypass_payment:
+        print("   💰 Payment requirements will be bypassed for test data")
+    else:
+        print("   💳 Payment requirements will be enforced (testing real flow)")
+    
     registered_count = 0
     waitlisted_count = 0
     failed_count = 0
 
     for user in test_users:
         try:
-            # Attempt to register user, allowing them to join the waitlist if full
-            response = EventService.register_for_event(
-                event_id=test_event.id,
-                user_id=user.id,
-                join_waitlist=True,  # Important for waitlist functionality
-            )
+            if bypass_payment and test_event.price_per_person > 0:
+                # For test data with paid events, directly create attendee records to completely bypass payment
+                response = create_direct_attendee(test_event, user)
+            else:
+                # Use normal registration flow (may require payment)
+                response = EventService.register_for_event(
+                    event_id=test_event.id,
+                    user_id=user.id,
+                    join_waitlist=True,  # Important for waitlist functionality
+                    payment_completed=bypass_payment,  # Bypass payment if requested
+                )
 
             message_text = ""
             is_error = False
@@ -298,14 +369,43 @@ def have_attendees_match(event: Event):
 
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Create test data for SAS API')
+    parser.add_argument('--event-type', choices=['free', 'paid', 'both'], default='both',
+                       help='Type of events to create (default: both)')
+    parser.add_argument('--no-payment-bypass', action='store_true',
+                       help='Do not bypass payment requirements (test real payment flow)')
+    args = parser.parse_args()
+    
     with app.app_context():
         delete_test_data()
         church_ids = create_test_churches()
         test_users = create_test_users(church_ids)
-        test_event = create_test_event(test_users[0].id)
-        create_test_attendees(test_users, test_event)
-        # have_attendees_match(test_event)
+        
+        events_created = []
+        
+        if args.event_type in ['free', 'both']:
+            print("\n=== Creating FREE test event ===")
+            free_event = create_test_event(test_users[0].id, "free")
+            events_created.append(free_event)
+            create_test_attendees(test_users, free_event, bypass_payment=(not args.no_payment_bypass))
+        
+        if args.event_type in ['paid', 'both']:
+            print("\n=== Creating PAID test event ===")
+            paid_event = create_test_event(test_users[1].id, "paid")
+            events_created.append(paid_event)
+            create_test_attendees(test_users, paid_event, bypass_payment=(not args.no_payment_bypass))
+        
+        # Optionally create matches for all events
+        # for event in events_created:
+        #     have_attendees_match(event)
+        
         create_admin_user(update=True)
+        
+        print(f"\n✅ Successfully created {len(events_created)} test event(s)")
+        for event in events_created:
+            print(f"   - {event.name} (ID: {event.id}) - Price: ${event.price_per_person}")
 
 
 if __name__ == "__main__":
