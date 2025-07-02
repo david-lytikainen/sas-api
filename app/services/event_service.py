@@ -324,6 +324,11 @@ class EventService:
             current_app.logger.info(f"Registration payment_status: {getattr(registration, 'payment_status', 'unknown')}")
             current_app.logger.info(f"Event price: {event.price_per_person}")
 
+            # Cancel the registration immediately for fast user feedback
+            current_app.logger.info(f"Deleting registration for user {user_id}, event {event_id}")
+            EventAttendeeRepository.delete(event_id, user_id)
+            current_app.logger.info(f"User {user_id} cancelled registration for event {event_id}")
+
             refund_info = None
             
             # Only process refunds for paid registrations, not pending payments
@@ -333,7 +338,7 @@ class EventService:
                 try:
                     from app.services.payment_service import PaymentService
                     
-                    # Check refund policy
+                    # Check refund policy (quick check first)
                     policy_result = PaymentService.check_refund_policy(event, registration)
                     current_app.logger.info(f"Refund policy result: {policy_result}")
                     
@@ -372,15 +377,7 @@ class EventService:
             else:
                 current_app.logger.info(f"Skipping refund: process_refund={process_refund}, payment_status={payment_status}, price={event.price_per_person}")
 
-            # Cancel the registration
-            current_app.logger.info(f"Deleting registration for user {user_id}, event {event_id}")
-            EventAttendeeRepository.delete(event_id, user_id)
-
-            # Log the cancellation for debugging
-            current_app.logger.info(f"User {user_id} cancelled registration for event {event_id}")
-
-            # Add a small delay before processing waitlist to allow immediate re-registration
-            # This prevents race conditions where the original user tries to re-register immediately
+            # Process waitlist in background (don't block the response)
             try:
                 # Attempt to register the first person from the waitlist if a spot opened up
                 EventService.process_waitlist_for_event(event_id)
