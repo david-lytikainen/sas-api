@@ -66,6 +66,14 @@ class User(db.Model):
         return False
 
     def to_dict(self):
+        # Get church name for current_church field
+        current_church = "Other"
+        if self.church_id:
+            from app.models.church import Church
+            church = Church.query.get(self.church_id)
+            if church:
+                current_church = church.name
+        
         return {
             "id": self.id,
             "role_id": self.role_id,
@@ -74,10 +82,13 @@ class User(db.Model):
             "last_name": self.last_name,
             "phone": self.phone,
             "gender": self.gender.value if self.gender else None,
-            "birthday": self.birthday if self.birthday else None,
+            "birthday": self.birthday.isoformat() if self.birthday else None,
             "age": self.calculate_age(),
             "church_id": self.church_id,
             "denomination_id": self.denomination_id,
+            "current_church": current_church,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
     def __repr__(self):

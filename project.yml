@@ -1,0 +1,34 @@
+name: SavedAndSingleApp
+options:
+  bundleIdPrefix: com.savedandsingle
+  deploymentTarget:
+    iOS: 16.0
+  xcodeVersion: 15.0
+targets:
+  SavedAndSingleApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: SavedAndSingleApp
+        excludes:
+          - "Assets.xcassets/**"
+          - "Preview Content/**"
+        includes:
+          - "**/*.swift"
+    resources:
+      - path: SavedAndSingleApp/Assets.xcassets
+      - path: SavedAndSingleApp/Preview Content
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.savedandsingle.app
+        DEVELOPMENT_TEAM: 7B4F3A5X2Y 
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: SavedAndSingleApp/Info.plist
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: 5.0
+    scheme:
+      environmentVariables:
+        - variable: OS_ACTIVITY_MODE
+          value: disable
+          isEnabled: true 
