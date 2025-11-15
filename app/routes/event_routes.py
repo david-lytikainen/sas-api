@@ -1299,6 +1299,9 @@ def get_round_info(event_id):
 @event_bp.route(
     "/events/<int:event_id>/speed-date-selections", methods=["POST", "OPTIONS"]
 )
+@event_bp.route(
+    "/events/<int:event_id>/submit-selections", methods=["POST", "OPTIONS"]
+)
 @cross_origin(supports_credentials=True)  # If CORS is needed
 @jwt_required()
 def submit_speed_date_selections(event_id):
