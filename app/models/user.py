@@ -70,10 +70,11 @@ class User(db.Model):
         current_church = "Other"
         if self.church_id:
             from app.models.church import Church
+
             church = Church.query.get(self.church_id)
             if church:
                 current_church = church.name
-        
+
         return {
             "id": self.id,
             "role_id": self.role_id,
