@@ -117,7 +117,7 @@ class SpeedDateMatcher:
                 current_app.logger.info(
                     f"Current compatible dates: {len(compatible_dates)}"
                 )
-            
+
             if len(compatible_dates) < min_dates_needed:
                 current_app.logger.info(
                     f"\nStill not enough matches, finding matches at same church"
