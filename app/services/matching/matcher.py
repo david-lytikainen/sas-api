@@ -96,6 +96,9 @@ class SpeedDateMatcher:
                         <= extended_age_difference
                     )
                 ]
+                current_app.logger.info(
+                    f"Current compatible dates: {len(compatible_dates)}"
+                )
 
             if len(compatible_dates) < min_dates_needed:
                 current_app.logger.info(
@@ -111,7 +114,10 @@ class SpeedDateMatcher:
                     )
                     and (abs(attendee.calculate_age() - match.calculate_age()) <= 5)
                 ]
-
+                current_app.logger.info(
+                    f"Current compatible dates: {len(compatible_dates)}"
+                )
+            
             if len(compatible_dates) < min_dates_needed:
                 current_app.logger.info(
                     f"\nStill not enough matches, finding matches at same church"
@@ -119,8 +125,11 @@ class SpeedDateMatcher:
                 compatible_dates = [
                     match
                     for match in all_opposite_gender
-                    if (abs(attendee.calculate_age() - match.calculate_age()) <= 3)
+                    if (abs(attendee.calculate_age() - match.calculate_age()) <= 5)
                 ]
+                current_app.logger.info(
+                    f"Current compatible dates: {len(compatible_dates)}"
+                )
 
             all_compatible_dates[attendee.id] = compatible_dates
             current_app.logger.info(
