@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 import os
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from limits.strategies import FixedWindowRateLimiter
 from app.extensions import db, migrate, jwt
 from app.utils.email import mail
 from datetime import timedelta
@@ -53,7 +52,7 @@ def create_app():
     app.config["CLIENT_URL"] = os.getenv("CLIENT_URL", "http://localhost:3000")
 
     # Implement rate limiting using flask-limiter
-    limiter = Limiter(
+    Limiter(
         get_remote_address,
         app=app,
         default_limits=["150 per minute, 10000 per hour, 100000 per day"],

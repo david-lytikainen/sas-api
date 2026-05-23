@@ -6,7 +6,6 @@ from app.services.matching.matcher import SpeedDateMatcher
 from app.extensions import db
 from flask import current_app
 from typing import List, Dict, Any, Tuple
-import json
 
 
 class SpeedDateService:

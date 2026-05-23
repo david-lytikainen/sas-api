@@ -1,7 +1,5 @@
 from app.repositories.event_timer_repository import EventTimerRepository
-from app.models.event_timer import EventTimer
-from app.services.speed_date_service import SpeedDateService
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 from typing import Dict, Any
 from flask import current_app

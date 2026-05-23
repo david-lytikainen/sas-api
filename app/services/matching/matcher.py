@@ -2,7 +2,6 @@ from typing import List, Dict, Tuple
 from app.models.user import User
 from app.models.enums import Gender
 from app.models.event_speed_date import EventSpeedDate
-from app.services.event_attendee_service import EventAttendeeService
 import math
 from flask import current_app
 
@@ -21,7 +20,7 @@ class SpeedDateMatcher:
         Find all potential matches for each attendee.
         +-3 years age difference (+-4 years if they don't have the threshold amount of potential dates)
         """
-        current_app.logger.info(f"\n\n=== Finding potential dates ===")
+        current_app.logger.info("\n\n=== Finding potential dates ===")
         current_app.logger.info(f"Males: {len(males)}, Females: {len(females)}")
         current_app.logger.info(
             f"Initial age difference: {initial_age_difference}, Extended: {extended_age_difference}"
@@ -102,7 +101,7 @@ class SpeedDateMatcher:
 
             if len(compatible_dates) < min_dates_needed:
                 current_app.logger.info(
-                    f"\nStill not enough matches, trying maximum age range (<= 5)"
+                    "\nStill not enough matches, trying maximum age range (<= 5)"
                 )
                 compatible_dates = [
                     match
@@ -120,7 +119,7 @@ class SpeedDateMatcher:
 
             if len(compatible_dates) < min_dates_needed:
                 current_app.logger.info(
-                    f"\nStill not enough matches, finding matches at same church"
+                    "\nStill not enough matches, finding matches at same church"
                 )
                 compatible_dates = [
                     match
@@ -346,35 +345,3 @@ class SpeedDateMatcher:
             round_number=round_number,
         )
         event_speed_dates.append(event_speed_date)
-
-    @staticmethod
-    def test():
-        from app import create_app
-
-        app = create_app()  # Or however you initialize your Flask app
-
-        with app.app_context():
-            mock_event_id = 13
-            mock_num_tables = 10
-            mock_num_rounds = 10
-            attendees = EventAttendeeService.get_checked_in_attendees(mock_event_id)
-
-            males = [user for user in attendees if user.gender == Gender.MALE]
-            females = [user for user in attendees if user.gender == Gender.FEMALE]
-
-            (all_compatible_dates, id_to_user) = (
-                SpeedDateMatcher.find_all_potential_dates(
-                    males, females, mock_num_tables, mock_num_rounds
-                )
-            )
-            event_speed_dates = SpeedDateMatcher.finalize_all_rounds(
-                all_compatible_dates,
-                id_to_user,
-                mock_event_id,
-                mock_num_tables,
-                mock_num_rounds,
-            )
-
-
-if __name__ == "__main__":
-    SpeedDateMatcher.test()

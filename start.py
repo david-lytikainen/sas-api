@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 import os
+from importlib import import_module
 from dotenv import load_dotenv
 from app import create_app, db
-import app.models.event_waitlist
 
 # Load environment variables
 load_dotenv()
 
 # Create the Flask application
 app = create_app()
+import_module("app.models.event_waitlist")
 
 # Create database tables if they don't exist
 with app.app_context():

@@ -97,8 +97,7 @@ class EventAttendeeRepository:
         try:
             db.session.commit()
             return registration
-        except Exception as e:
+        except Exception:
             db.session.rollback()
-            # Log error e
             # current_app.logger.error(f"Error updating registration status for attendee {registration.id}: {str(e)}")
             return None

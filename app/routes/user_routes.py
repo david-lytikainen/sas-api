@@ -41,7 +41,7 @@ def sign_up():
         return make_response(jsonify(result), 201)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
@@ -118,7 +118,7 @@ def forgot_password():
 
         result = UserService.forgot_password(data["email"])
         return jsonify(result), 200
-    except Exception as e:
+    except Exception:
         # Generic error to avoid leaking information
         return (
             jsonify({"error": "An error occurred while processing your request."}),
@@ -137,5 +137,5 @@ def reset_password(token):
         return jsonify(result), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         return jsonify({"error": "An unexpected error occurred"}), 500

@@ -1,10 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from app import create_app
 from app.models import User
 from app.extensions import db
 from werkzeug.security import generate_password_hash
 from app.models.enums import Gender
-from datetime import datetime, timedelta
 
 
 def create_admin_user(update=False):

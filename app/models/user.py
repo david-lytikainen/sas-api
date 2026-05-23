@@ -2,7 +2,6 @@ from app.extensions import db
 from datetime import date, datetime, timedelta, timezone
 from .enums import Gender
 import secrets
-from flask import current_app
 
 
 class User(db.Model):

@@ -240,7 +240,7 @@ class EventService:
                     )
                     # Optionally: Send a notification to the user they have been registered.
                     # current_app.logger.info(f"User {first_waitlisted.user_id} registered from waitlist for event {event_id}")
-                except Exception as e:
+                except Exception:
                     # current_app.logger.error(f"Error registering user {first_waitlisted.user_id} from waitlist for event {event_id}: {str(e)}")
                     pass  # Keep them on waitlist if registration fails for some reason
 
