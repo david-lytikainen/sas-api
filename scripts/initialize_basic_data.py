@@ -6,7 +6,6 @@ sys.path.append(
 )  # relative imports
 
 from app import create_app, db
-from app.models.enums import UserRole
 from sqlalchemy.sql import text
 
 

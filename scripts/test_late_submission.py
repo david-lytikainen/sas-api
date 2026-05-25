@@ -485,7 +485,7 @@ def test_late_submission():
 
     user_id = get_user_id_from_email(TEST_USER_EMAIL, DATABASE_URL)
 
-    print(f"\nFinding or creating test event...")
+    print("\nFinding or creating test event...")
     event_id, speed_date_id = create_test_event_if_needed(DATABASE_URL, user_id)
     if not event_id or not speed_date_id:
         print("Test aborted: Could not find or create test event.")
@@ -495,7 +495,7 @@ def test_late_submission():
     TEST_EVENT_ID = event_id
     TEST_SPEED_DATE_ID = speed_date_id
 
-    print(f"\nVerifying test data...")
+    print("\nVerifying test data...")
     if not verify_test_data(TEST_EVENT_ID, TEST_SPEED_DATE_ID, DATABASE_URL):
         print("Test aborted: Test data verification failed.")
         return False
@@ -547,7 +547,7 @@ def test_late_submission():
                     )
                     return False
             elif response.status_code == 500:
-                print(f"FAILURE: Server error (500) occurred. Full response text:")
+                print("FAILURE: Server error (500) occurred. Full response text:")
                 print(response.text)
                 if "Traceback" in response.text:
                     print("\nServer traceback detected. Error details:")

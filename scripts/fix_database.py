@@ -5,7 +5,7 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )  # relative imports
 
-from app import create_app, db
+from app import create_app
 from flask_migrate import upgrade
 
 

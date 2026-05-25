@@ -1,7 +1,7 @@
 from app.models.event_speed_date import EventSpeedDate
 from app.models.user import User
-from app.models.enums import Gender
-from app.services.event_attendee_service import EventAttendeeService
+from app.models.event_attendee import EventAttendee
+from app.models.enums import Gender, RegistrationStatus
 from app.services.matching.matcher import SpeedDateMatcher
 from app.extensions import db
 from flask import current_app
@@ -9,6 +9,18 @@ from typing import List, Dict, Any, Tuple
 
 
 class SpeedDateService:
+    @staticmethod
+    def get_checked_in_attendees(event_id: int) -> List[User]:
+        return (
+            db.session.query(User)
+            .join(EventAttendee, User.id == EventAttendee.user_id)
+            .filter(
+                EventAttendee.event_id == event_id,
+                EventAttendee.status == RegistrationStatus.CHECKED_IN,
+            )
+            .all()
+        )
+
     @staticmethod
     def generate_schedule(
         event_id: int, num_tables: int, num_rounds: int
@@ -28,7 +40,7 @@ class SpeedDateService:
             EventSpeedDate.query.filter_by(event_id=event_id).delete()
             db.session.commit()
 
-            attendees = EventAttendeeService.get_checked_in_attendees(event_id)
+            attendees = SpeedDateService.get_checked_in_attendees(event_id)
             if not attendees or len(attendees) < 2:
                 current_app.logger.warning(
                     f"Not enough attendees checked in for event {event_id} to generate schedule"
@@ -193,7 +205,7 @@ class SpeedDateService:
         """
         try:
             # Get all checked-in attendees
-            attendees = EventAttendeeService.get_checked_in_attendees(event_id)
+            attendees = SpeedDateService.get_checked_in_attendees(event_id)
 
             # Get schedule for each attendee
             schedules = {}

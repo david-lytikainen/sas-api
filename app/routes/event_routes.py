@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.event_attendee import EventAttendee
 from app.models.event_waitlist import EventWaitlist
 from app.models.event_speed_date import EventSpeedDate
+from app.models.event_timer import EventTimer
 from app.models.enums import EventStatus, RegistrationStatus, UserRole, Gender
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
@@ -12,15 +13,120 @@ from flask_cors import cross_origin
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
-from app.services.event_timer_service import EventTimerService
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from sqlalchemy import or_
 
 event_bp = Blueprint("event", __name__)
 
-# Apply default rate limit to all routes in this blueprint
-# limiter.limit("", apply_defaults=True)(event_bp)
+def get_event_timer(event_id):
+    return EventTimer.query.filter_by(event_id=event_id).first()
+
+
+def create_event_timer(event_id, round_duration=210):
+    event = Event.query.get(event_id)
+    timer = EventTimer(
+        event_id=event_id,
+        current_round=1,
+        final_round=event.num_rounds if event and event.num_rounds else 1,
+        round_duration=round_duration,
+    )
+    db.session.add(timer)
+    db.session.commit()
+    return timer
+
+
+def delete_event_timer(event_id):
+    timer = get_event_timer(event_id)
+    if timer:
+        db.session.delete(timer)
+        db.session.commit()
+
+
+def start_event_timer_round(event_id, round_number=None):
+    timer = get_event_timer(event_id) or create_event_timer(event_id)
+    if round_number:
+        timer.current_round = round_number
+    timer.round_start_time = datetime.now(timezone.utc)
+    timer.is_paused = False
+    timer.pause_time_remaining = None
+    db.session.commit()
+    return timer
+
+
+def end_event_timer_round(event_id):
+    timer = get_event_timer(event_id)
+    if timer and timer.round_start_time:
+        timer.round_start_time = datetime.now(timezone.utc) - timedelta(
+            seconds=timer.round_duration
+        )
+        db.session.commit()
+    return timer
+
+
+def pause_event_timer_round(event_id, time_remaining):
+    timer = get_event_timer(event_id)
+    if not timer or timer.is_paused:
+        return None
+
+    timer.is_paused = True
+    timer.pause_time_remaining = time_remaining
+    timer.round_start_time = None
+    db.session.commit()
+    return timer
+
+
+def resume_event_timer_round(event_id):
+    timer = get_event_timer(event_id)
+    if not timer or not timer.is_paused:
+        return None
+
+    elapsed_seconds = 0
+    if timer.pause_time_remaining is not None:
+        elapsed_seconds = timer.round_duration - timer.pause_time_remaining
+
+    timer.is_paused = False
+    timer.round_start_time = datetime.now(timezone.utc) - timedelta(
+        seconds=elapsed_seconds
+    )
+    db.session.commit()
+    return timer
+
+
+def advance_event_timer_round(event_id):
+    timer = get_event_timer(event_id)
+    if not timer:
+        return None
+
+    timer.current_round += 1
+    timer.round_start_time = datetime.now(timezone.utc)
+    timer.is_paused = False
+    timer.pause_time_remaining = None
+    db.session.commit()
+    return timer
+
+
+def update_event_timer_duration(event_id, round_duration=None, break_duration=None):
+    timer = get_event_timer(event_id)
+    if not timer:
+        return None
+
+    if round_duration is not None:
+        timer.round_duration = round_duration
+    if break_duration is not None:
+        timer.break_duration = break_duration
+
+    db.session.commit()
+    return timer
+
+
+def current_user_can_manage_event_timer(current_user, event):
+    if current_user.role_id == UserRole.ADMIN.value:
+        return True
+    return (
+        current_user.role_id == UserRole.ORGANIZER.value
+        and str(event.creator_id) == str(current_user.id)
+    )
 
 
 @event_bp.route("/events", methods=["GET", "OPTIONS"])
@@ -247,21 +353,9 @@ def generate_schedules(event_id):
             num_rounds = int(num_rounds)
 
             if num_tables < 1 or num_rounds < 1:
-                return (
-                    jsonify(
-                        {
-                            "error": "Number of tables and rounds must be positive integers"
-                        }
-                    ),
-                    400,
-                )
+                return (jsonify({"error": "Number of tables and rounds must be positive integers"}), 400,)
         except (ValueError, TypeError):
-            return (
-                jsonify(
-                    {"error": "Invalid input for tables or rounds, must be integers"}
-                ),
-                400,
-            )
+            return (jsonify({"error": "Invalid input for tables or rounds, must be integers"}),400,)
 
         if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
             return jsonify({"error": "Unauthorized"}), 403
@@ -282,8 +376,8 @@ def generate_schedules(event_id):
             event.num_rounds = num_rounds_actual
             event.num_tables = num_tables_actual
             db.session.commit()
-            EventTimerService.delete_timer(event_id)
-            EventTimerService.create_timer(event_id)
+            delete_event_timer(event_id)
+            create_event_timer(event_id)
             current_app.logger.info(f"Event {event_id} status set to IN_PROGRESS.")
             return jsonify({"message": "Event schedule generated"})
         else:
@@ -974,22 +1068,10 @@ def get_timer_status(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        try:
-            timer_status = EventTimerService.get_timer_status(event_id)
-            return jsonify(timer_status), 200
-        except Exception as timer_error:
-            print(f"Error in timer service: {str(timer_error)}")
-            return (
-                jsonify(
-                    {
-                        "has_timer": False,
-                        "status": "error",
-                        "message": "Timer service error. Please try again later.",
-                        "debug_info": str(timer_error),
-                    }
-                ),
-                200,
-            )
+        timer = get_event_timer(event_id)
+        if not timer:
+            return jsonify(None), 200
+        return jsonify(timer.to_dict()), 200
     except Exception as e:
         print(f"Error retrieving timer status for event {event_id}: {str(e)}")
         return jsonify({"error": "Failed to retrieve timer status"}), 500
@@ -1001,22 +1083,17 @@ def start_round(event_id):
     current_user_id = get_jwt_identity()
 
     try:
+        event = Event.query.get_or_404(event_id)
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        if not is_admin:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
         data = request.get_json() or {}
         round_number = data.get("round_number")
-
-        result = EventTimerService.start_round(event_id, round_number)
-
-        if "error" in result:
-            return jsonify(result), 400
-
-        return jsonify(result), 200
+        timer = start_event_timer_round(event_id, round_number)
+        return jsonify({"timer": timer.to_dict(), "message": f"Round {timer.current_round} started"}), 200
 
     except Exception as e:
         print(f"Error starting round for event {event_id}: {str(e)}")
@@ -1028,17 +1105,19 @@ def start_round(event_id):
 def end_round(event_id):
     current_user_id = get_jwt_identity()
     try:
+        event = Event.query.get_or_404(event_id)
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        if not is_admin:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
-        result = EventTimerService.end_round(event_id)
+        timer = end_event_timer_round(event_id)
+        if not timer:
+            return jsonify({"error": "Timer not found"}), 404
 
-        return jsonify(result.to_dict()), 200
+        return jsonify(timer.to_dict()), 200
 
     except Exception as e:
         print(f"Error end round for event {event_id}: {str(e)}")
@@ -1056,11 +1135,7 @@ def pause_round(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
         data = request.get_json() or {}
@@ -1077,22 +1152,12 @@ def pause_round(event_id):
             )
             return jsonify({"error": "'time_remaining' must be an integer"}), 400
 
-        current_app.logger.info(
-            f"Calling EventTimerService.pause_round for event {event_id} with time {time_remaining}"
-        )
-        result = EventTimerService.pause_round(event_id, time_remaining)
+        timer = pause_event_timer_round(event_id, time_remaining)
 
-        if result is None or "error" in result:
-            current_app.logger.error(
-                f"Error received from EventTimerService.pause_round: {result}"
-            )
-            return (
-                jsonify(
-                    result or {"error": "Failed to pause timer in service/repository"}
-                ),
-                400,
-            )
-        return jsonify(result), 200
+        if not timer:
+            return jsonify({"error": "Timer not found or could not be paused"}), 400
+
+        return jsonify({"timer": timer.to_dict(), "message": f"Round {timer.current_round} paused with {time_remaining} seconds remaining"}), 200
 
     except Exception as e:
         current_app.logger.error(
@@ -1117,39 +1182,19 @@ def resume_round(event_id):
         # Check if event exists
         event = Event.query.get_or_404(event_id)
 
-        # Verify user is admin or event creator
         current_user = User.query.get(current_user_id)
 
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
-        # Resume the round
-        current_app.logger.info(
-            f"Calling EventTimerService.resume_round for event {event_id}"
-        )
-        result = EventTimerService.resume_round(event_id)
-        current_app.logger.info(f"EventTimerService.resume_round returned: {result}")
+        timer = resume_event_timer_round(event_id)
+        if not timer:
+            return jsonify({"error": "Timer not found or is not paused"}), 400
 
-        if result is None or "error" in result:
-            current_app.logger.error(
-                f"Error received from EventTimerService.resume_round: {result}"
-            )
-            return (
-                jsonify(
-                    result or {"error": "Failed to resume timer in service/repository"}
-                ),
-                400,
-            )
-
-        return jsonify(result), 200
+        return jsonify({"timer": timer.to_dict(), "message": f"Round {timer.current_round} resumed"}), 200
 
     except Exception as e:
         current_app.logger.error(
@@ -1171,19 +1216,22 @@ def next_round(event_id):
     current_user_id = get_jwt_identity()
 
     try:
+        event = Event.query.get_or_404(event_id)
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        if not is_admin:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
-        result = EventTimerService.next_round(event_id)
+        timer = get_event_timer(event_id)
+        if not timer:
+            return jsonify({"error": "Timer not found"}), 404
 
-        if "error" in result:
-            return jsonify(result), 400
+        if timer.current_round >= timer.final_round:
+            return jsonify({"timer": timer.to_dict(), "message": "All rounds completed", "complete": True}), 200
 
-        return jsonify(result), 200
+        timer = advance_event_timer_round(event_id)
+        return jsonify({"timer": timer.to_dict(), "message": f"Advanced to round {timer.current_round}"}), 200
 
     except Exception as e:
         print(f"Error advancing to next round for event {event_id}: {str(e)}")
@@ -1199,25 +1247,17 @@ def update_round_duration(event_id):
         # Check if event exists
         event = Event.query.get_or_404(event_id)
 
-        # Verify user is admin or event creator
         current_user = User.query.get(current_user_id)
 
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
 
-        # Get round duration from request
         data = request.get_json() or {}
-
-        round_duration = data.get("round_duration")  # Optional
-        break_duration = data.get("break_duration")  # Optional
+        round_duration = data.get("round_duration")
+        break_duration = data.get("break_duration")
 
         # Validate that at least one was provided
         if round_duration is None and break_duration is None:
@@ -1237,62 +1277,20 @@ def update_round_duration(event_id):
         except (ValueError, TypeError):
             return jsonify({"error": "Durations must be integers"}), 400
 
-        # Update round duration
-        result = EventTimerService.update_duration(
-            event_id, round_duration, break_duration
-        )
+        if round_duration is not None and not 30 <= round_duration <= 900:
+            return jsonify({"error": "Round duration must be between 30 and 900 seconds"}), 400
+        if break_duration is not None and not 15 <= break_duration <= 600:
+            return jsonify({"error": "Break duration must be between 15 and 600 seconds"}), 400
 
-        if "error" in result:
-            return jsonify(result), 400
+        timer = update_event_timer_duration(event_id, round_duration, break_duration)
+        if not timer:
+            return jsonify({"error": "Timer not found"}), 404
 
-        return jsonify(result), 200
+        return jsonify({"timer": timer.to_dict(), "message": "Timer duration updated"}), 200
 
     except Exception as e:
         print(f"Error updating round duration for event {event_id}: {str(e)}")
         return jsonify({"error": "Failed to update round duration"}), 500
-
-
-@event_bp.route("/events/<int:event_id>/round-info", methods=["GET"])
-@jwt_required()
-def get_round_info(event_id):
-    """Get minimal round information for regular attendees"""
-
-    try:
-        try:
-            # Try to get timer status
-            timer_status = EventTimerService.get_timer_status(event_id)
-
-            # Return only round information
-            round_info = {
-                "has_timer": timer_status.get("has_timer", False),
-                "status": timer_status.get("status"),
-                "current_round": (
-                    timer_status.get("timer", {}).get("current_round")
-                    if timer_status.get("timer")
-                    else None
-                ),
-            }
-
-            return jsonify(round_info), 200
-
-        except Exception as timer_error:
-            # Fallback if timer service fails
-            print(f"Error in timer service for round info: {str(timer_error)}")
-            return (
-                jsonify(
-                    {
-                        "has_timer": False,
-                        "status": "unknown",
-                        "current_round": None,
-                        "error": "Timer temporarily unavailable",
-                    }
-                ),
-                200,
-            )
-
-    except Exception as e:
-        print(f"Error retrieving round info for event {event_id}: {str(e)}")
-        return jsonify({"error": "Failed to retrieve round information"}), 500
 
 
 # New route for submitting speed date selections

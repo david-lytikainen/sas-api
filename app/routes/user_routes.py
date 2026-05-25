@@ -1,9 +1,96 @@
 from flask import Blueprint, request, jsonify, make_response
-from app.services import UserService
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import User
+from app.models.enums import Gender
+from app.models.church import Church
+from app.extensions import db
+from app.utils.email import send_password_reset_email
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_jwt_extended import create_access_token
+from flask import current_app
+from datetime import timedelta, datetime
+import logging
 
 user_bp = Blueprint("user", __name__)
+logger = logging.getLogger(__name__)
+
+
+def find_user_by_email(email):
+    return User.query.filter_by(email=email).first()
+
+
+def sign_up_user(user_data):
+    existing_user = find_user_by_email(user_data["email"])
+    if existing_user:
+        raise ValueError("User already exists")
+
+    gender_str = user_data["gender"].upper()
+    try:
+        gender = Gender[gender_str]
+    except KeyError:
+        raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
+
+    church_id = None
+    church_name = user_data.get("current_church")
+    if church_name and church_name != "Other":
+        church = Church.query.filter_by(name=church_name).first()
+        if not church:
+            church = Church(name=church_name)
+            db.session.add(church)
+            db.session.commit()
+        church_id = church.id
+
+    user = User(
+        role_id=user_data["role_id"],
+        email=user_data["email"],
+        password=generate_password_hash(user_data["password"]),
+        first_name=user_data["first_name"],
+        last_name=user_data["last_name"],
+        phone=user_data["phone"],
+        gender=gender,
+        birthday=datetime.strptime(user_data["birthday"], "%Y-%m-%d").date(),
+        church_id=church_id,
+        denomination_id=user_data.get("denomination_id"),
+    )
+
+    db.session.add(user)
+    db.session.commit()
+    access_token = create_access_token(identity=user.id, expires_delta=timedelta(days=1))
+    return {"token": access_token, "user": user.to_dict()}
+
+
+def sign_in_user(email, password):
+    user = find_user_by_email(email)
+    if not user:
+        raise ValueError("Invalid email")
+    if not check_password_hash(user.password, password):
+        raise ValueError("Invalid password")
+
+    access_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+    return {"token": access_token, "user": user.to_dict()}
+
+
+def send_forgot_password_email(email):
+    user = find_user_by_email(email)
+    response = {"message": "Password reset link has been sent."}
+
+    if user:
+        send_password_reset_email(user)
+        if current_app.testing:
+            response["reset_token"] = user.reset_token
+    return response
+
+
+def reset_user_password(token, new_password):
+    user = User.verify_reset_token(token)
+    if not user:
+        raise ValueError("Invalid or expired token")
+
+    user.password = generate_password_hash(new_password)
+    user.reset_token = None
+    user.reset_token_expiration = None
+    db.session.commit()
+    return {"message": "Your password has been reset successfully."}
 
 
 @user_bp.route("/signup", methods=["POST"])
@@ -37,7 +124,7 @@ def sign_up():
                 400,
             )
 
-        result = UserService.sign_up(user_data)
+        result = sign_up_user(user_data)
         return make_response(jsonify(result), 201)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -72,7 +159,7 @@ def sign_in():
                 400,
             )
 
-        result = UserService.sign_in(user_data["email"], user_data["password"])
+        result = sign_in_user(user_data["email"], user_data["password"])
         response = make_response(jsonify(result), 200)
         return response
     except ValueError as e:
@@ -116,7 +203,7 @@ def forgot_password():
         if not data or "email" not in data:
             return jsonify({"error": "Email is required"}), 400
 
-        result = UserService.forgot_password(data["email"])
+        result = send_forgot_password_email(data["email"])
         return jsonify(result), 200
     except Exception:
         # Generic error to avoid leaking information
@@ -133,7 +220,7 @@ def reset_password(token):
         if not data or "password" not in data:
             return jsonify({"error": "Password is required"}), 400
 
-        result = UserService.reset_password(token, data["password"])
+        result = reset_user_password(token, data["password"])
         return jsonify(result), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

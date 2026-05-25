@@ -8,7 +8,7 @@ sys.path.append(
 from decimal import Decimal
 from app import create_app, db
 from app.models.user import User
-from app.models.enums import EventStatus, Gender, RegistrationStatus
+from app.models.enums import Gender, RegistrationStatus
 from app.models.event import Event
 from app.models.event_attendee import EventAttendee
 from app.models.event_speed_date import EventSpeedDate
@@ -122,9 +122,15 @@ def create_test_event(creator_id):
     db.session.add(test_event)
     db.session.commit()
 
-    from app.services.event_timer_service import EventTimerService
-
-    EventTimerService.create_timer(test_event.id)
+    db.session.add(
+        EventTimer(
+            event_id=test_event.id,
+            current_round=1,
+            final_round=test_event.num_rounds,
+            round_duration=210,
+        )
+    )
+    db.session.commit()
 
     return test_event
 
