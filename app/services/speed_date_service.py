@@ -94,45 +94,22 @@ class SpeedDateService:
 
     @staticmethod
     def get_schedule_for_attendee(event_id: int, user_id: int) -> List[Dict[str, Any]]:
-        """
-        Get the speed dating schedule for a specific attendee
-
-        Args:
-            event_id: ID of the event
-            user_id: ID of the user
-
-        Returns:
-            List of scheduled dates with details
-        """
         try:
-            # Determine user's gender
             user = User.query.get(user_id)
             if not user:
                 return []
 
-            # Query based on gender
             if user.gender == Gender.MALE:
-                # For males, look at the male_id field
-                speed_dates = (
-                    EventSpeedDate.query.filter_by(event_id=event_id, male_id=user_id)
-                    .order_by(EventSpeedDate.round_number)
-                    .all()
-                )
+                speed_dates = (EventSpeedDate.query.filter_by(event_id=event_id, male_id=user_id).order_by(EventSpeedDate.round_number).all())
                 partner_id_field = "female_id"
                 interested_field = "male_interested"
                 partner_interested_field = "female_interested"
             else:
-                # For females, look at the female_id field
-                speed_dates = (
-                    EventSpeedDate.query.filter_by(event_id=event_id, female_id=user_id)
-                    .order_by(EventSpeedDate.round_number)
-                    .all()
-                )
+                speed_dates = (EventSpeedDate.query.filter_by(event_id=event_id, female_id=user_id).order_by(EventSpeedDate.round_number).all())
                 partner_id_field = "male_id"
                 interested_field = "female_interested"
                 partner_interested_field = "male_interested"
 
-            # Get user's church name
             user_church = "Other"
             if user.church_id:
                 from app.models.church import Church
@@ -141,17 +118,14 @@ class SpeedDateService:
                 if church:
                     user_church = church.name
 
-            # Calculate user's age
             user_age = user.calculate_age()
 
-            # Format the schedule with partner details
             schedule = []
             for date in speed_dates:
                 partner_id = getattr(date, partner_id_field)
                 partner = User.query.get(partner_id)
 
                 if partner:
-                    # Get partner's church name
                     partner_church = "Other"
                     if partner.church_id:
                         from app.models.church import Church
@@ -160,10 +134,7 @@ class SpeedDateService:
                         if church:
                             partner_church = church.name
 
-                    # Calculate partner's age
                     partner_age = partner.calculate_age()
-
-                    # Determine if there's a match (both interested)
                     user_interested = getattr(date, interested_field)
                     partner_interested = getattr(date, partner_interested_field)
                     is_match = user_interested is True and partner_interested is True
@@ -181,6 +152,7 @@ class SpeedDateService:
                             "user_church": user_church,
                             "event_speed_date_id": date.id,
                             "match": is_match,
+                            "user_interested": user_interested
                         }
                     )
 

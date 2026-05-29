@@ -970,37 +970,23 @@ def get_schedule(event_id):
     current_user_id = get_jwt_identity()
 
     try:
-        # Check if event exists
         event = Event.query.get_or_404(event_id)
 
-        # Check if event is in progress or completed
         if event.status not in [
             EventStatus.IN_PROGRESS.value,
             EventStatus.COMPLETED.value,
         ]:
-            return (
-                jsonify({"error": "Schedule not available. Event has not started"}),
-                400,
-            )
+            return (jsonify({"error": "Schedule not available. Event has not started"}), 400,)
 
-        # Check if user is registered for this event
-        attendee = EventAttendee.query.filter_by(
-            event_id=event_id, user_id=current_user_id
-        ).first()
+        attendee = EventAttendee.query.filter_by(event_id=event_id, user_id=current_user_id).first()
 
         if not attendee:
             return jsonify({"error": "You are not registered for this event"}), 403
 
-        # Get the user's schedule
         schedule = SpeedDateService.get_schedule_for_attendee(event_id, current_user_id)
 
         if not schedule:
-            return (
-                jsonify(
-                    {"message": "No schedule available. Make sure you are checked in."}
-                ),
-                404,
-            )
+            return (jsonify({"message": "No schedule available. Make sure you are checked in."}),404,)
 
         return jsonify({"schedule": schedule}), 200
 
