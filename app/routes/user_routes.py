@@ -114,19 +114,13 @@ def sign_up():
         missing_fields = [field for field in required_fields if field not in user_data]
 
         if missing_fields:
-            return (
-                jsonify(
-                    {
-                        "error": "Missing required fields",
-                        "missing_fields": missing_fields,
-                    }
-                ),
-                400,
-            )
+            return (jsonify({"error": "Missing required fields", "missing_fields": missing_fields,}),400,)
 
         result = sign_up_user(user_data)
         return make_response(jsonify(result), 201)
     except ValueError as e:
+        if str(e) == "User already exists":
+            return (jsonify({"error": "An account already exists for this email. Please go to Sign In and use Forgot Password if needed."}),409,)
         return jsonify({"error": str(e)}), 400
     except Exception:
         return jsonify({"error": "An unexpected error occurred"}), 500
@@ -226,3 +220,12 @@ def reset_password(token):
         return jsonify({"error": str(e)}), 400
     except Exception:
         return jsonify({"error": "An unexpected error occurred"}), 500
+
+
+@user_bp.route("/churches", methods=["GET"])
+def get_churches():
+    try:
+        churches = Church.query.order_by(Church.name.asc()).all()
+        return jsonify([church.name for church in churches]), 200
+    except Exception:
+        return jsonify({"error": "Failed to fetch churches"}), 500
