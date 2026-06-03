@@ -16,6 +16,7 @@ from app.services.speed_date_service import SpeedDateService
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from sqlalchemy import or_
+import random
 
 event_bp = Blueprint("event", __name__)
 
@@ -962,6 +963,59 @@ def update_waitlist_attendee_details(event_id, user_id):
             exc_info=True,
         )
         return jsonify({"error": f"Error updating waitlist user: {str(e)}"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/waitlist/<int:user_id>/register", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def move_waitlist_user_to_registered(event_id, user_id):
+    if request.method == "OPTIONS":
+        return "", 204
+
+    verify_jwt_in_request()
+    current_user_id = get_jwt_identity()
+
+    try:
+        event = Event.query.get_or_404(event_id)
+        current_user = User.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "User not found"}), 403
+
+        is_admin = current_user.role_id == UserRole.ADMIN.value
+        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
+
+        if not is_admin and not is_event_creator:
+            return jsonify({"error": "Unauthorized to move waitlist user"}), 403
+
+        waitlist_entry = EventWaitlist.query.filter_by(event_id=event_id, user_id=user_id).first()
+        if not waitlist_entry:
+            return jsonify({"error": "User is not waitlisted for this event"}), 404
+
+        existing_attendee = EventAttendee.query.filter_by(event_id=event_id, user_id=user_id).first()
+        if existing_attendee:
+            return jsonify({"error": "User is already registered for this event"}), 400
+
+        pin = "".join(random.choices("0123456789", k=4))
+        attendee = EventAttendee(
+            event_id=event_id,
+            user_id=user_id,
+            status=RegistrationStatus.REGISTERED,
+            pin=pin,
+        )
+
+        db.session.add(attendee)
+        db.session.delete(waitlist_entry)
+        db.session.commit()
+
+        return jsonify({"message": "User moved to registered successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(
+            f"Error moving waitlist user {user_id} to registered for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": f"Error moving waitlist user: {str(e)}"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/schedule", methods=["GET"])
