@@ -5,6 +5,8 @@ from app.models.enums import Gender
 from app.models.church import Church
 from app.extensions import db
 from app.utils.email import send_password_reset_email
+from app.services.stripe_service import StripeService
+from app.services.event_service import EventService
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from flask import current_app
@@ -41,7 +43,7 @@ def sign_up_user(user_data):
         church_id = church.id
 
     user = User(
-        role_id=user_data["role_id"],
+        role_id=1,
         email=user_data["email"],
         password=generate_password_hash(user_data["password"]),
         first_name=user_data["first_name"],
@@ -97,14 +99,12 @@ def reset_user_password(token, new_password):
 def sign_up():
     try:
         user_data = request.get_json()
-        print(user_data)
         if not user_data:
             return jsonify({"error": "No data provided"}), 400
 
         required_fields = [
             "email",
             "password",
-            "role_id",
             "first_name",
             "last_name",
             "phone",
@@ -229,3 +229,107 @@ def get_churches():
         return jsonify([church.name for church in churches]), 200
     except Exception:
         return jsonify({"error": "Failed to fetch churches"}), 500
+
+@user_bp.route("/connect/onboarding", methods=["POST"])
+@jwt_required()
+def create_connect_onboarding():
+    current_user_id = get_jwt_identity()
+
+    try:
+        user = User.query.get_or_404(current_user_id)
+        if user.role_id == 3:
+            return jsonify({"error": "Admins do not need Stripe Connect onboarding."}), 400
+
+        onboarding_url = StripeService.create_connect_onboarding_link(user)
+        return jsonify({"url": onboarding_url}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Error creating Stripe Connect onboarding link for user {current_user_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to create Stripe Connect onboarding link"}), 500
+
+
+@user_bp.route("/organizer-status/refresh", methods=["POST"])
+@jwt_required()
+def refresh_organizer_status():
+    current_user_id = get_jwt_identity()
+
+    try:
+        user = User.query.get_or_404(current_user_id)
+        if user.role_id == 3:
+            return jsonify({"user": user.to_dict()}), 200
+
+        if user.stripe_connected_account_id:
+            user = StripeService.sync_connect_status(user)
+
+        return jsonify({"user": user.to_dict()}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Error refreshing organizer status for user {current_user_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to refresh organizer status"}), 500
+
+
+@user_bp.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        event = StripeService.construct_webhook_event(payload, sig_header)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(f"Stripe webhook signature error: {str(e)}")
+        return jsonify({"error": "Invalid webhook signature"}), 400
+
+    event_type = event["type"]
+    data_object = event["data"]["object"]
+
+    try:
+        if event_type == "checkout.session.completed":
+            metadata = data_object.get("metadata") or {}
+            checkout_type = metadata.get("checkout_type")
+
+            if checkout_type == "event_registration":
+                user_id = metadata.get("user_id")
+                event_id = metadata.get("event_id")
+                user = User.query.get(int(user_id)) if user_id else None
+                if user:
+                    user.stripe_customer_id = data_object.get("customer")
+                    db.session.commit()
+
+                if event_id and user_id:
+                    registration_response = EventService.register_for_event(
+                        int(event_id), int(user_id), join_waitlist=False
+                    )
+                    if isinstance(registration_response, dict) and "error" in registration_response:
+                        current_app.logger.warning(
+                            f"Paid checkout completed but registration failed for user {user_id} event {event_id}: {registration_response['error']}"
+                        )  # TODO: manual refund path if this happens
+
+        elif event_type == "account.updated":
+            metadata = data_object.get("metadata") or {}
+            user_id = metadata.get("user_id")
+            user = User.query.get(int(user_id)) if user_id else None
+            if user:
+                user.stripe_connect_onboarding_complete = bool(
+                    data_object.get("details_submitted")
+                    and data_object.get("charges_enabled")
+                    and data_object.get("payouts_enabled")
+                )
+                if user.stripe_connect_onboarding_complete and user.role_id == 1:
+                    user.role_id = 2
+                db.session.commit()
+
+        return jsonify({"received": True}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Stripe webhook handling error: {str(e)}", exc_info=True)
+        return jsonify({"error": "Webhook handling failed"}), 500

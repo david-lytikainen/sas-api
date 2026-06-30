@@ -50,6 +50,27 @@ def create_app():
     app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME")
     app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
     app.config["CLIENT_URL"] = os.getenv("CLIENT_URL", "http://localhost:3000")
+    app.config["STRIPE_SECRET_KEY"] = os.getenv("STRIPE_SECRET_KEY", "")
+    app.config["STRIPE_WEBHOOK_SECRET"] = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    app.config["STRIPE_CONNECT_COUNTRY"] = os.getenv(
+        "STRIPE_CONNECT_COUNTRY", "US"
+    )  # TODO: change if platform country differs
+    app.config["STRIPE_CONNECT_REFRESH_URL"] = os.getenv(
+        "STRIPE_CONNECT_REFRESH_URL",
+        f'{app.config["CLIENT_URL"]}/events?view=create&stripe_connect=refresh',
+    )  # TODO: replace with final Stripe refresh URL if needed
+    app.config["STRIPE_CONNECT_RETURN_URL"] = os.getenv(
+        "STRIPE_CONNECT_RETURN_URL",
+        f'{app.config["CLIENT_URL"]}/events?view=create&stripe_connect=return',
+    )  # TODO: replace with final Stripe return URL if needed
+    app.config["STRIPE_CHECKOUT_SUCCESS_URL"] = os.getenv(
+        "STRIPE_CHECKOUT_SUCCESS_URL",
+        f'{app.config["CLIENT_URL"]}/events?view=create&checkout=success&session_id={{CHECKOUT_SESSION_ID}}',
+    )  # TODO: replace with final Stripe success URL if needed
+    app.config["STRIPE_CHECKOUT_CANCEL_URL"] = os.getenv(
+        "STRIPE_CHECKOUT_CANCEL_URL",
+        f'{app.config["CLIENT_URL"]}/events?view=create&checkout=cancelled',
+    )  # TODO: replace with final Stripe cancel URL if needed
 
     # Implement rate limiting using flask-limiter
     Limiter(

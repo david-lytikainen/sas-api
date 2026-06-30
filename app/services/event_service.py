@@ -9,6 +9,7 @@ from app.repositories.event_waitlist_repository import EventWaitlistRepository
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models import Event
+from app.services.stripe_service import StripeService
 from typing import List
 
 
@@ -30,7 +31,7 @@ class EventService:
     def create_event(data, user_id):
         user = UserRepository.find_by_id(user_id)
 
-        if user.role_id not in [2, 3]:  # 2 = Organizer, 3 = Admin
+        if not StripeService.user_can_manage_events(user):
             raise UnauthorizedError()
 
         required_fields = [
@@ -43,6 +44,13 @@ class EventService:
         missing = [f for f in required_fields if f not in data]
         if missing:
             raise MissingFieldsError(missing)
+        if user.role_id != 3:
+            is_intro_event = Event.query.filter_by(creator_id=user_id).count() < 2
+            minimum_price = StripeService.minimum_ticket_price(is_intro_event)
+            if Decimal(str(data["price_per_person"])) < minimum_price:
+                return {
+                    "error": f"Minimum price per person is ${minimum_price} so your payout is not negative."
+                }, 400
 
         event = EventRepository.create_event(
             {
@@ -65,37 +73,33 @@ class EventService:
         return event
 
     @staticmethod
-    def register_for_event(event_id: int, user_id: int, join_waitlist: bool = False):
+    def validate_registration_for_event(event_id: int, user_id: int):
         event = EventRepository.get_event(event_id)
         if not event:
-            return {"error": f"Event with ID {event_id} not found"}
+            return None, {"error": f"Event with ID {event_id} not found"}
         if event.status != EventStatus.REGISTRATION_OPEN.value:
-            return {"error": "Event is not open for registration"}
+            return None, {"error": "Event is not open for registration"}
+
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
             event_id, user_id
         )
         if existing_registration:
-            return {"error": "You are already registered for this event"}
+            return None, {"error": "You are already registered for this event"}
+
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
         if on_waitlist:
-            return {"error": "You are already on the waitlist for this event"}
+            return None, {"error": "You are already on the waitlist for this event"}
 
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
         if attendee_count >= event.max_capacity:
-            if join_waitlist:
-                return EventService.join_event_waitlist(event_id, user_id)
-            else:
-                return {
-                    "error": "Event is currently full",
-                    "waitlist_available": True,
-                }
+            return None, {"error": "Event is currently full", "waitlist_available": True}
 
-        # check if event is full for this gender
         user = UserRepository.find_by_id(user_id)
         if not user:
-            return {"error": f"User with ID {user_id} not found"}
+            return None, {"error": f"User with ID {user_id} not found"}
+
         same_gender_count = (
             EventAttendeeRepository.count_by_event_and_status_and_gender(
                 event_id,
@@ -104,13 +108,22 @@ class EventService:
             )
         )
         if same_gender_count >= math.floor(event.max_capacity * 0.6):
+            return None, {
+                "error": "Event is currently full for this gender",
+                "waitlist_available": True,
+            }
+
+        return event, None
+
+    @staticmethod
+    def register_for_event(event_id: int, user_id: int, join_waitlist: bool = False):
+        event, validation_error = EventService.validate_registration_for_event(
+            event_id, user_id
+        )
+        if validation_error:
             if join_waitlist:
                 return EventService.join_event_waitlist(event_id, user_id)
-            else:
-                return {
-                    "error": "Event is currently full for this gender",
-                    "waitlist_available": True,
-                }
+            return validation_error
 
         # Generate random 4-digit PIN
         pin = "".join(random.choices("0123456789", k=4))
@@ -303,7 +316,10 @@ class EventService:
         # Admin can edit any event, Organizer can only edit their own
         if not (
             user.role_id == 3
-            or (user.role_id == 2 and str(event.creator_id) == str(user_id))
+            or (
+                StripeService.user_can_manage_events(user)
+                and str(event.creator_id) == str(user_id)
+            )
         ):
             raise UnauthorizedError("You are not authorized to update this event.")
 
@@ -333,6 +349,18 @@ class EventService:
                 elif field == "price_per_person":
                     try:
                         update_data[field] = Decimal(str(value))
+                        if user.role_id != 3:
+                            minimum_price = StripeService.minimum_ticket_price(
+                                StripeService.is_intro_event(event)
+                            )
+                            if update_data[field] < minimum_price:
+                                return (
+                                    None,
+                                    {
+                                        "error": f"Minimum price per person is ${minimum_price} so your payout is not negative."
+                                    },
+                                    400,
+                                )
                     except ValueError:
                         return None, {"error": f"Invalid format for {field}"}, 400
                 elif field == "max_capacity":
@@ -376,7 +404,10 @@ class EventService:
         # Admin can delete any event, Organizer can only delete their own
         if not (
             user.role_id == 3
-            or (user.role_id == 2 and str(event.creator_id) == str(user_id))
+            or (
+                StripeService.user_can_manage_events(user)
+                and str(event.creator_id) == str(user_id)
+            )
         ):
             raise UnauthorizedError("You are not authorized to delete this event.")
 

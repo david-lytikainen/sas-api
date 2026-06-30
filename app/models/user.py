@@ -22,6 +22,9 @@ class User(db.Model):
     denomination_id = db.Column(
         db.Integer, db.ForeignKey("denominations.id"), nullable=True
     )
+    stripe_customer_id = db.Column(db.String(255), nullable=True)
+    stripe_connected_account_id = db.Column(db.String(255), nullable=True)
+    stripe_connect_onboarding_complete = db.Column(db.Boolean, nullable=True)
     updated_at = db.Column(
         db.TIMESTAMP(timezone=True),
         nullable=False,
@@ -65,14 +68,15 @@ class User(db.Model):
         return False
 
     def to_dict(self):
-        # Get church name for current_church field
+        from app.models.church import Church
+        from app.models.event import Event
+
         current_church = "Other"
         if self.church_id:
-            from app.models.church import Church
-
             church = Church.query.get(self.church_id)
             if church:
                 current_church = church.name
+        created_event_count = Event.query.filter_by(creator_id=self.id).count()
 
         return {
             "id": self.id,
@@ -87,6 +91,10 @@ class User(db.Model):
             "church_id": self.church_id,
             "denomination_id": self.denomination_id,
             "current_church": current_church,
+            "created_event_count": created_event_count,
+            "stripe_customer_id": self.stripe_customer_id,
+            "stripe_connected_account_id": self.stripe_connected_account_id,
+            "stripe_connect_onboarding_complete": self.stripe_connect_onboarding_complete,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

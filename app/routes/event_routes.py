@@ -13,6 +13,7 @@ from flask_cors import cross_origin
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
+from app.services.stripe_service import StripeService
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from sqlalchemy import or_
@@ -122,10 +123,16 @@ def update_event_timer_duration(event_id, round_duration=None, break_duration=No
 
 
 def current_user_can_manage_event_timer(current_user, event):
+    return current_user_can_manage_event(current_user, event)
+
+
+def current_user_can_manage_event(current_user, event):
+    if not current_user:
+        return False
     if current_user.role_id == UserRole.ADMIN.value:
         return True
     return (
-        current_user.role_id == UserRole.ORGANIZER.value
+        StripeService.user_can_manage_events(current_user)
         and str(event.creator_id) == str(current_user.id)
     )
 
@@ -323,6 +330,46 @@ def register_for_event(event_id):
     )
 
 
+@event_bp.route("/events/<int:event_id>/checkout", methods=["POST"])
+@jwt_required()
+def create_event_registration_checkout(event_id):
+    current_user_id = get_jwt_identity()
+
+    try:
+        event, validation_error = EventService.validate_registration_for_event(
+            event_id, current_user_id
+        )
+        if validation_error:
+            if validation_error.get("waitlist_available"):
+                return jsonify(validation_error), 409
+            return jsonify(validation_error), 400
+
+        if not event:
+            return jsonify({"error": "Event not found"}), 404
+
+        if not event.price_per_person or float(event.price_per_person) <= 0:
+            return jsonify({"error": "This event does not require payment"}), 400
+
+        attendee = User.query.get_or_404(current_user_id)
+        organizer = User.query.get_or_404(event.creator_id)
+
+        if organizer.role_id != UserRole.ADMIN.value and not StripeService.user_can_manage_events(organizer):
+            return jsonify({"error": "Organizer is not ready to accept payments yet."}), 400
+
+        checkout_url = StripeService.create_event_registration_checkout(
+            event, attendee, organizer
+        )
+        return jsonify({"url": checkout_url}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Error creating event checkout for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to create checkout session"}), 500
+
+
 @event_bp.route(
     "/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"]
 )
@@ -358,7 +405,7 @@ def generate_schedules(event_id):
         except (ValueError, TypeError):
             return (jsonify({"error": "Invalid input for tables or rounds, must be integers"}),400,)
 
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized"}), 403
         if event.status != EventStatus.REGISTRATION_OPEN.value:
             return (
@@ -447,12 +494,7 @@ def update_event_status(event_id):
             return jsonify({"error": "User not found"}), 403
 
         # Check if user has permission to update the event
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to update this event"}), 403
 
         # Store the current status before changing it
@@ -498,12 +540,7 @@ def get_event_attendee_pins(event_id):
             return jsonify({"error": "User not found"}), 403
 
         # Check if user has permission to view pins
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to view attendee pins"}), 403
 
         # Get all attendees with their pins
@@ -555,12 +592,7 @@ def get_event_attendees(event_id):
             return jsonify({"error": "User not found"}), 403
 
         # Check if user has permission to view attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to view attendee information"}), 403
 
         # Get all attendees with detailed user information
@@ -633,12 +665,7 @@ def update_attendee_details(event_id, attendee_id):
             return jsonify({"error": "User not found"}), 403
 
         # Check if user has permission to update attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return (
                 jsonify({"error": "Unauthorized to update attendee information"}),
                 403,
@@ -810,12 +837,7 @@ def update_waitlist_attendee_details(event_id, user_id):
             return jsonify({"error": "User not found"}), 403
 
         # Check if user has permission to update attendees
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return (
                 jsonify(
                     {"error": "Unauthorized to update waitlist attendee information"}
@@ -982,10 +1004,7 @@ def move_waitlist_user_to_registered(event_id, user_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(event.creator_id) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to move waitlist user"}), 403
 
         waitlist_entry = EventWaitlist.query.filter_by(event_id=event_id, user_id=user_id).first()
@@ -1062,12 +1081,7 @@ def get_all_schedules(event_id):
 
         # Check permissions
         current_user = User.query.get(current_user_id)
-        if current_user.role_id not in [UserRole.ADMIN.value, UserRole.ORGANIZER.value]:
-            return jsonify({"error": "Unauthorized"}), 403
-
-        if current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) != str(current_user_id):
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized"}), 403
 
         # --- Add Logging ---
@@ -1681,12 +1695,7 @@ def get_all_matches_for_event(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to view all event matches"}), 403
 
         if event.status not in [
@@ -1788,12 +1797,7 @@ def get_event_waitlist(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        is_admin = current_user.role_id == UserRole.ADMIN.value
-        is_event_creator = current_user.role_id == UserRole.ORGANIZER.value and str(
-            event.creator_id
-        ) == str(current_user_id)
-
-        if not is_admin and not is_event_creator:
+        if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized to view event waitlist"}), 403
 
         waitlist_entries = (
