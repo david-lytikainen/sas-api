@@ -198,6 +198,8 @@ def get_event_by_id(event_id):
 
         # Get the specific event
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
         event_data = event.to_dict()
 
         # Check if user is registered for this event
@@ -980,6 +982,8 @@ def get_schedule(event_id):
 
     try:
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
 
         if event.status not in [
             EventStatus.IN_PROGRESS.value,
@@ -1014,6 +1018,8 @@ def get_all_schedules(event_id):
     try:
         # Check if event exists
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
 
         # Check permissions
         current_user = User.query.get(current_user_id)
@@ -1058,6 +1064,12 @@ def get_timer_status(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
+        event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify(None), 200
+
         timer = get_event_timer(event_id)
         if not timer:
             return jsonify(None), 200
@@ -1074,11 +1086,15 @@ def start_round(event_id):
 
     try:
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         data = request.get_json() or {}
         round_number = data.get("round_number")
@@ -1096,12 +1112,16 @@ def end_round(event_id):
     current_user_id = get_jwt_identity()
     try:
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         timer = end_event_timer_round(event_id)
         if not timer:
@@ -1121,12 +1141,16 @@ def pause_round(event_id):
 
     try:
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         data = request.get_json() or {}
         if "time_remaining" not in data:
@@ -1171,6 +1195,8 @@ def resume_round(event_id):
     try:
         # Check if event exists
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
 
         current_user = User.query.get(current_user_id)
 
@@ -1179,6 +1205,8 @@ def resume_round(event_id):
 
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         timer = resume_event_timer_round(event_id)
         if not timer:
@@ -1207,11 +1235,15 @@ def next_round(event_id):
 
     try:
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 403
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         timer = get_event_timer(event_id)
         if not timer:
@@ -1236,6 +1268,8 @@ def update_round_duration(event_id):
     try:
         # Check if event exists
         event = Event.query.get_or_404(event_id)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
 
         current_user = User.query.get(current_user_id)
 
@@ -1244,6 +1278,8 @@ def update_round_duration(event_id):
 
         if not current_user_can_manage_event_timer(current_user, event):
             return jsonify({"error": "Unauthorized to manage event timer"}), 403
+        if event.status != EventStatus.IN_PROGRESS.value:
+            return jsonify({"error": "Timer controls are only available while the event is in progress."}), 400
 
         data = request.get_json() or {}
         round_duration = data.get("round_duration")
@@ -1321,7 +1357,8 @@ def submit_speed_date_selections(event_id):
 
     try:
         event = Event.query.get_or_404(event_id)
-        now_utc = datetime.now(timezone.utc)
+        if EventService.auto_complete_event_if_due(event):
+            db.session.commit()
 
         if event.status != EventStatus.IN_PROGRESS.value:
             current_app.logger.warning(
@@ -1478,6 +1515,8 @@ def get_my_matches(event_id):
     event = Event.query.get(event_id)
     if not event:
         return jsonify({"error": "Event not found"}), 404
+    if EventService.auto_complete_event_if_due(event):
+        db.session.commit()
 
     if event.status != EventStatus.COMPLETED.value:
         return (
