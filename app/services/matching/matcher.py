@@ -4,6 +4,7 @@ from app.models.enums import Gender
 from app.models.event_speed_date import EventSpeedDate
 import math
 from flask import current_app
+from sqlalchemy import or_
 
 
 class SpeedDateMatcher:
@@ -33,11 +34,21 @@ class SpeedDateMatcher:
 
             all_opposite_gender = females if attendee.gender == Gender.MALE else males
             current_app.logger.info(f"Total potential matches in opposite gender: {len(all_opposite_gender)}")
+            previous_date_user_ids = {
+                speed_date.female_id if attendee.gender == Gender.MALE else speed_date.male_id
+                for speed_date in EventSpeedDate.query.filter(
+                    or_(
+                        EventSpeedDate.male_id == attendee.id,
+                        EventSpeedDate.female_id == attendee.id,
+                    )
+                ).all()
+            }
 
             compatible_dates = [
                 potential_date for potential_date in all_opposite_gender
                 if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
                     and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 3)
+                    and potential_date.id not in previous_date_user_ids
             ]
             current_app.logger.info(f"\nInitial len of compatible dates (age diff <= 3): {len(compatible_dates)}")
 
@@ -53,6 +64,7 @@ class SpeedDateMatcher:
                     potential_date for potential_date in all_opposite_gender
                     if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
                         and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 4)
+                        and potential_date.id not in previous_date_user_ids
                 ]
                 current_app.logger.info(f"New number of compatible dates with age <= 4: {len(compatible_dates)}")
 
@@ -62,6 +74,7 @@ class SpeedDateMatcher:
                     potential_date for potential_date in all_opposite_gender
                     if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
                         and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 5)
+                        and potential_date.id not in previous_date_user_ids
                 ]
                 current_app.logger.info(f"New number of compatible dates with age <= 5: {len(compatible_dates)}")
 
@@ -70,6 +83,7 @@ class SpeedDateMatcher:
                 compatible_dates = [
                     potential_date for potential_date in all_opposite_gender
                     if (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 5)
+                        and potential_date.id not in previous_date_user_ids
                 ]
                 current_app.logger.info(f"Current compatible dates: {len(compatible_dates)}")
 
