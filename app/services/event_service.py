@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import math
-import random
 from app.repositories.event_repository import EventRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.event_attendee_repository import EventAttendeeRepository
@@ -125,15 +124,11 @@ class EventService:
                 return EventService.join_event_waitlist(event_id, user_id)
             return validation_error
 
-        # Generate random 4-digit PIN
-        pin = "".join(random.choices("0123456789", k=4))
-
         EventAttendeeRepository.register_for_event(
             {
                 "event_id": event_id,
                 "user_id": user_id,
                 "status": RegistrationStatus.REGISTERED,
-                "pin": pin,
             }
         )
 
@@ -237,15 +232,12 @@ class EventService:
                         )
                     )
 
-                # Attempt to register this user
-                pin = "".join(random.choices("0123456789", k=4))
                 try:
                     EventAttendeeRepository.register_for_event(
                         {
                             "event_id": event_id,
                             "user_id": first_waitlisted.user_id,
                             "status": RegistrationStatus.REGISTERED,
-                            "pin": pin,
                         }
                     )
                     EventWaitlistRepository.remove_from_waitlist(
@@ -259,6 +251,10 @@ class EventService:
 
     @staticmethod
     def check_in(event_id: int, user_id: int, pin: str):
+        return {"error": "Self check-in has been removed. Ask event staff to check you in."}, 410
+
+    @staticmethod
+    def manual_check_in(event_id: int, user_id: int):
         event = EventRepository.get_event(event_id)
         if not event:
             return {"error": f"Event with ID {event_id} not found"}, 404
@@ -287,14 +283,11 @@ class EventService:
                 "error": f"Cannot check in. Your registration status is: {registration.status.name if registration.status else 'Unknown'}"
             }, 400
 
-        if registration.pin != pin:
-            return {"error": "Invalid PIN"}, 401  # Unauthorized or 400 Bad Request
-
         updated_registration = EventAttendeeRepository.update_registration_status(
             registration, RegistrationStatus.CHECKED_IN, datetime.now(timezone.utc)
         )
         if updated_registration:
-            return {"message": "Successfully checked in"}, 200
+            return {"message": "Successfully checked in attendee"}, 200
         else:
             # This case should ideally not be hit if update is robust
             return {"error": "Failed to update registration status for check-in"}, 500

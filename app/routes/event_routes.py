@@ -14,6 +14,7 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
+from app.utils.churches import resolve_church_id
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from sqlalchemy import or_
@@ -151,13 +152,12 @@ def get_events():
     # Get user's actual registrations
     user_registrations = EventAttendee.query.filter_by(user_id=user_id).all()
     registrations_map = {
-        reg.event_id: {
-            "event_id": reg.event_id,
-            "status": reg.status.value,
-            "pin": reg.pin,
-            "registration_date": (
-                reg.registration_date.isoformat() if reg.registration_date else None
-            ),
+            reg.event_id: {
+                "event_id": reg.event_id,
+                "status": reg.status.value,
+                "registration_date": (
+                    reg.registration_date.isoformat() if reg.registration_date else None
+                ),
             "check_in_date": (
                 reg.check_in_date.isoformat() if reg.check_in_date else None
             ),
@@ -172,7 +172,6 @@ def get_events():
             registrations_map[wl_entry.event_id] = {
                 "event_id": wl_entry.event_id,
                 "status": RegistrationStatus.WAITLISTED.value,
-                "pin": None,
                 "registration_date": (
                     wl_entry.waitlisted_at.isoformat()
                     if wl_entry.waitlisted_at
@@ -209,7 +208,6 @@ def get_event_by_id(event_id):
         if registration:
             registration_data = {
                 "status": registration.status.value,
-                "pin": registration.pin,
                 "registration_date": (
                     registration.registration_date.isoformat()
                     if registration.registration_date
@@ -443,16 +441,14 @@ def generate_schedules(event_id):
 @event_bp.route("/events/<int:event_id>/check-in", methods=["POST"])
 @jwt_required()
 def check_in(event_id):
-    current_user_id = get_jwt_identity()
-    data = request.get_json()
-
-    if not data or "pin" not in data:
-        return jsonify({"error": "Missing PIN"}), 400
-
-    pin = data["pin"]
-
-    response, status_code = EventService.check_in(event_id, current_user_id, pin)
-    return jsonify(response), status_code
+    return (
+        jsonify(
+            {
+                "error": "Self check-in has been removed. Ask an event organizer or admin to check you in."
+            }
+        ),
+        410,
+    )
 
 
 @event_bp.route("/events/<int:event_id>/status", methods=["PATCH", "OPTIONS"])
@@ -520,58 +516,6 @@ def update_event_status(event_id):
         return jsonify({"error": f"Error updating status: {str(e)}"}), 500
 
 
-@event_bp.route("/events/<int:event_id>/attendee-pins", methods=["GET", "OPTIONS"])
-@cross_origin(supports_credentials=True)
-def get_event_attendee_pins(event_id):
-    if request.method == "OPTIONS":
-        return "", 204
-
-    verify_jwt_in_request()
-    current_user_id = get_jwt_identity()
-
-    try:
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-
-        # Get the user with role preloaded to avoid lazy loading issues
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        # Check if user has permission to view pins
-        if not current_user_can_manage_event(current_user, event):
-            return jsonify({"error": "Unauthorized to view attendee pins"}), 403
-
-        # Get all attendees with their pins
-        attendees = (
-            db.session.query(EventAttendee, User)
-            .join(User, EventAttendee.user_id == User.id)
-            .filter(
-                EventAttendee.event_id == event_id,
-                EventAttendee.status.in_(
-                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
-                ),
-            )
-            .all()
-        )
-
-        attendee_data = [
-            {
-                "name": f"{user.first_name} {user.last_name}",
-                "email": user.email,
-                "pin": attendee.pin,
-                "status": attendee.status.value if attendee.status else None,
-            }
-            for attendee, user in attendees
-        ]
-
-        return jsonify(attendee_data), 200
-    except Exception as e:
-        print(f"Error in get_event_attendee_pins: {str(e)}")
-        return jsonify({"error": f"Error retrieving pins: {str(e)}"}), 500
-
-
 @event_bp.route("/events/<int:event_id>/attendees", methods=["GET", "OPTIONS"])
 @cross_origin(supports_credentials=True)
 def get_event_attendees(event_id):
@@ -632,7 +576,6 @@ def get_event_attendees(event_id):
                     else None
                 ),
                 "status": attendee.status.value,
-                "pin": attendee.pin,
             }
             for attendee, user, church in attendees
         ]
@@ -729,37 +672,13 @@ def update_attendee_details(event_id, attendee_id):
                     jsonify({"error": "Invalid birthday format. Use YYYY-MM-DD"}),
                     400,
                 )
-        if "church" in data and data["church"]:
+        if "church" in data:
             try:
-                church_input = data["church"]
-                church = None
-
-                # Try to parse as integer first (church ID)
-                try:
-                    church_id = int(church_input)
-                    church = Church.query.get(church_id)
-                except (ValueError, TypeError):
-                    # If it's not an integer, treat it as a church name
-                    church = Church.query.filter_by(name=church_input).first()
-
-                if church:
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
-                else:
-                    # If church not found, create a new one
-                    church = Church(name=church_input)
-                    db.session.add(church)
-                    db.session.commit()
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
+                user_to_update.church_id = resolve_church_id(data["church"])
+                updated_fields.append("church")
 
             except Exception as e:
                 return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-
-        # Update attendee fields
-        if "pin" in data and data["pin"]:
-            attendee.pin = data["pin"]
-            updated_fields.append("pin")
 
         # Save changes if any fields were updated
         if updated_fields:
@@ -792,7 +711,6 @@ def update_attendee_details(event_id, attendee_id):
                 ),
                 "phone": user_to_update.phone,
                 "church": church_name,
-                "pin": attendee.pin,
             }
 
             return (
@@ -812,6 +730,40 @@ def update_attendee_details(event_id, attendee_id):
         db.session.rollback()
         print(f"Error updating attendee details: {str(e)}")
         return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
+
+
+@event_bp.route(
+    "/events/<int:event_id>/attendees/<int:attendee_id>/check-in", methods=["POST"]
+)
+@jwt_required()
+def manual_check_in_attendee(event_id, attendee_id):
+    current_user_id = get_jwt_identity()
+
+    try:
+        event = Event.query.get_or_404(event_id)
+        current_user = User.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "User not found"}), 403
+
+        if not current_user_can_manage_event(current_user, event):
+            return jsonify({"error": "Unauthorized to check in attendees"}), 403
+
+        registration = EventAttendee.query.filter_by(
+            event_id=event_id, user_id=attendee_id
+        ).first()
+        if not registration:
+            return jsonify({"error": "User is not registered for this event"}), 404
+
+        response, status_code = EventService.manual_check_in(event_id, attendee_id)
+        return jsonify(response), status_code
+    except Exception as e:
+        current_app.logger.error(
+            f"Error manually checking in attendee {attendee_id} for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
+        db.session.rollback()
+        return jsonify({"error": "Failed to manually check in attendee"}), 500
 
 
 @event_bp.route(
@@ -904,26 +856,10 @@ def update_waitlist_attendee_details(event_id, user_id):
                     ),
                     400,
                 )
-        if "church" in data and data["church"]:
+        if "church" in data:
             try:
-                church_input = data["church"]
-                church = None
-
-                if isinstance(church_input, int):
-                    church = Church.query.get(church_input)
-                elif isinstance(church_input, str):
-                    church = Church.query.filter_by(name=church_input).first()
-                    if not church and church_input:
-                        church = Church(name=church_input)
-                        db.session.add(church)
-                        db.session.flush()
-
-                if church:
-                    user_to_update.church_id = church.id
-                    updated_fields.append("church")
-                elif not church_input:
-                    user_to_update.church_id = None
-                    updated_fields.append("church")
+                user_to_update.church_id = resolve_church_id(data["church"])
+                updated_fields.append("church")
 
             except Exception as e:
                 current_app.logger.error(
@@ -1387,51 +1323,18 @@ def submit_speed_date_selections(event_id):
         event = Event.query.get_or_404(event_id)
         now_utc = datetime.now(timezone.utc)
 
-        allowed_statuses = [EventStatus.IN_PROGRESS.value]
-        is_allowed_status = event.status in allowed_statuses
-
-        is_recently_completed = False
-        if event.status == EventStatus.COMPLETED.value:
-            # Ensure event.updated_at exists and is datetime object
-            if event.updated_at and isinstance(event.updated_at, datetime):
-                # Ensure updated_at is timezone-aware (assuming UTC storage or convert)
-                updated_at_utc = (
-                    event.updated_at.replace(tzinfo=timezone.utc)
-                    if event.updated_at.tzinfo is None
-                    else event.updated_at
-                )
-                time_since_completion = now_utc - updated_at_utc
-                if time_since_completion <= timedelta(hours=24):
-                    is_recently_completed = True
-                    current_app.logger.info(
-                        f"Event {event_id} completed {time_since_completion} ago, within 24h submission window."
-                    )
-                else:
-                    current_app.logger.warning(
-                        f"Event {event_id} completed more than 24 hours ago ({time_since_completion}). Selections closed for user {current_user_id}."
-                    )
-            else:
-                # Log warning if updated_at is missing or not a datetime for a completed event
-                current_app.logger.warning(
-                    f"Event {event_id} is Completed but has missing or invalid updated_at timestamp ({event.updated_at}). Cannot verify 24-hour submission window."
-                )
-
-        current_app.logger.info(
-            f"Submission check for event {event_id}: Status='{event.status}'. Allowed Status Check={is_allowed_status}. Recently Completed Check={is_recently_completed}"
-        )
-
-        # If neither condition is met, reject the submission
-        if not (is_allowed_status or is_recently_completed):
+        if event.status != EventStatus.IN_PROGRESS.value:
             current_app.logger.warning(
                 f"Event {event_id} status '{event.status}' does not allow selections for user {current_user_id} at this time."
             )
-            error_message = f"Speed date selections window is closed for this event. Current status: {event.status}"
-            if (
-                event.status == EventStatus.COMPLETED.value
-                and not is_recently_completed
-            ):
-                error_message = "Speed date selections window closed 24 hours after event completion."
-            return jsonify({"error": error_message}), 400
+            return (
+                jsonify(
+                    {
+                        "error": f"Speed date selections are only available while the event is in progress. Current status: {event.status}"
+                    }
+                ),
+                400,
+            )
 
         # Check if user is checked-in attendee
         attendee_record = EventAttendee.query.filter_by(
@@ -1583,47 +1486,6 @@ def get_my_matches(event_id):
             ),
             400,
         )
-    else:
-        # Event is completed, check if 24 hours have passed since completion
-        now_utc = datetime.now(timezone.utc)
-        if event.updated_at and isinstance(event.updated_at, datetime):
-            updated_at_utc = (
-                event.updated_at.replace(tzinfo=timezone.utc)
-                if event.updated_at.tzinfo is None
-                else event.updated_at
-            )
-            time_since_completion = now_utc - updated_at_utc
-
-            if time_since_completion < timedelta(hours=24):
-                # Less than 24 hours have passed
-                current_app.logger.info(
-                    f"Match request for completed event {event_id} denied. Only {time_since_completion} has passed."
-                )
-                return (
-                    jsonify(
-                        {
-                            "error": "Matches will be available 24 hours after event completion."
-                        }
-                    ),
-                    403,
-                )
-            # Else (24 hours or more have passed), proceed to fetch matches below
-            current_app.logger.info(
-                f"Match request for completed event {event_id} allowed. {time_since_completion} has passed."
-            )
-        else:
-            # Handle case where completed event is missing a valid updated_at timestamp
-            current_app.logger.error(
-                f"Cannot determine match availability for completed event {event_id}: missing or invalid updated_at ({event.updated_at})"
-            )
-            return (
-                jsonify(
-                    {
-                        "error": "Cannot determine match availability time due to missing event completion data."
-                    }
-                ),
-                500,
-            )
 
     attendee_record = EventAttendee.query.filter(
         EventAttendee.event_id == event_id,
@@ -1681,80 +1543,16 @@ def get_my_matches(event_id):
 @cross_origin(supports_credentials=True)
 @jwt_required()
 def get_all_matches_for_event(event_id):
-    """Get all mutual matches for an event - admin/organizer only"""
     if request.method == "OPTIONS":
         return "", 204
-
-    current_user_id = get_jwt_identity()
-
-    try:
-        event = Event.query.get_or_404(event_id)
-
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        if not current_user_can_manage_event(current_user, event):
-            return jsonify({"error": "Unauthorized to view all event matches"}), 403
-
-        if event.status not in [
-            EventStatus.IN_PROGRESS.value,
-            EventStatus.COMPLETED.value,
-        ]:
-            return (
-                jsonify(
-                    {"error": "Matches are only available for events that have started"}
-                ),
-                400,
-            )
-
-        mutual_matches_query = EventSpeedDate.query.filter(
-            EventSpeedDate.event_id == event_id,
-            EventSpeedDate.male_interested == True,
-            EventSpeedDate.female_interested == True,
-        ).all()
-
-        matches_details = []
-        if mutual_matches_query:
-            user_ids = set()
-            for record in mutual_matches_query:
-                user_ids.add(record.male_id)
-                user_ids.add(record.female_id)
-
-            users_dict = {
-                user.id: user for user in User.query.filter(User.id.in_(user_ids)).all()
+    return (
+        jsonify(
+            {
+                "error": "Event organizers and admins do not have match visibility in the current product flow."
             }
-
-            for record in mutual_matches_query:
-                male_user = users_dict.get(record.male_id)
-                female_user = users_dict.get(record.female_id)
-
-                if male_user and female_user:
-                    matches_details.append(
-                        {
-                            "user1_name": f"{male_user.first_name} {male_user.last_name}",
-                            "user1_email": male_user.email,
-                            "user2_name": f"{female_user.first_name} {female_user.last_name}",
-                            "user2_email": female_user.email,
-                        }
-                    )
-
-            matches_details.sort(
-                key=lambda x: (x["user1_name"].lower(), x["user2_name"].lower())
-            )
-
-        current_app.logger.info(
-            f"Admin/organizer {current_user_id} viewed {len(matches_details)} matches for event {event_id}"
-        )
-        return jsonify({"matches": matches_details}), 200
-
-    except Exception as e:
-        current_app.logger.error(
-            f"Error retrieving all matches for event {event_id}: {str(e)}",
-            exc_info=True,
-        )
-        return jsonify({"error": "Failed to retrieve matches"}), 500
+        ),
+        403,
+    )
 
 
 @event_bp.route("/events/<int:event_id>", methods=["DELETE", "OPTIONS"])

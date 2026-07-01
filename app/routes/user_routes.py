@@ -5,6 +5,7 @@ from app.models.enums import Gender
 from app.models.church import Church
 from app.extensions import db
 from app.utils.email import send_password_reset_email
+from app.utils.churches import resolve_church_id
 from app.services.stripe_service import StripeService
 from app.services.event_service import EventService
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -32,15 +33,7 @@ def sign_up_user(user_data):
     except KeyError:
         raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
 
-    church_id = None
-    church_name = user_data.get("current_church")
-    if church_name and church_name != "Other":
-        church = Church.query.filter_by(name=church_name).first()
-        if not church:
-            church = Church(name=church_name)
-            db.session.add(church)
-            db.session.commit()
-        church_id = church.id
+    church_id = resolve_church_id(user_data.get("current_church"))
 
     user = User(
         role_id=1,
