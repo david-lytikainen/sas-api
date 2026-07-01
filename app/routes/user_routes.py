@@ -22,6 +22,10 @@ def find_user_by_email(email):
     return User.query.filter_by(email=email).first()
 
 
+def serialize_user(user: User):
+    return {"user": user.to_dict()}
+
+
 def sign_up_user(user_data):
     existing_user = find_user_by_email(user_data["email"])
     if existing_user:
@@ -86,6 +90,52 @@ def reset_user_password(token, new_password):
     user.reset_token_expiration = None
     db.session.commit()
     return {"message": "Your password has been reset successfully."}
+
+
+def update_profile(user: User, data):
+    updated_fields = []
+
+    if "first_name" in data and data["first_name"]:
+        user.first_name = data["first_name"].strip()
+        updated_fields.append("first_name")
+
+    if "last_name" in data and data["last_name"]:
+        user.last_name = data["last_name"].strip()
+        updated_fields.append("last_name")
+
+    if "email" in data and data["email"]:
+        normalized_email = data["email"].strip().lower()
+        existing_user = find_user_by_email(normalized_email)
+        if existing_user and existing_user.id != user.id:
+            raise ValueError("An account already exists for this email.")
+        user.email = normalized_email
+        updated_fields.append("email")
+
+    if "phone" in data and data["phone"]:
+        user.phone = data["phone"].strip()
+        updated_fields.append("phone")
+
+    if "gender" in data and data["gender"]:
+        gender_str = data["gender"].upper()
+        try:
+            user.gender = Gender[gender_str]
+        except KeyError:
+            raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
+        updated_fields.append("gender")
+
+    if "birthday" in data and data["birthday"]:
+        try:
+            user.birthday = datetime.strptime(data["birthday"], "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("Invalid birthday format. Use YYYY-MM-DD")
+        updated_fields.append("birthday")
+
+    if "current_church" in data:
+        user.church_id = resolve_church_id(data["current_church"])
+        updated_fields.append("current_church")
+
+    db.session.commit()
+    return {"message": "Profile updated successfully", "updated_fields": updated_fields, "user": user.to_dict()}
 
 
 @user_bp.route("/signup", methods=["POST"])
@@ -181,6 +231,35 @@ def validate_token():
     except Exception as e:
         print(f"Token validation error: {str(e)}")
         return jsonify({"error": "Invalid or expired token"}), 401
+
+
+@user_bp.route("/profile", methods=["GET", "PATCH"])
+@jwt_required()
+def user_profile():
+    current_user_id = get_jwt_identity()
+
+    try:
+        current_user = User.query.get_or_404(current_user_id)
+
+        if request.method == "GET":
+            return jsonify(serialize_user(current_user)), 200
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        result = update_profile(current_user, data)
+        return jsonify(result), 200
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(
+            f"Profile update error for user {current_user_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to update profile"}), 500
 
 
 @user_bp.route("/forgot-password", methods=["POST"])
