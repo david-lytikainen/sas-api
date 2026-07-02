@@ -379,7 +379,10 @@ def stripe_webhook():
 
                 if event_id and user_id:
                     registration_response = EventService.register_for_event(
-                        int(event_id), int(user_id), join_waitlist=False
+                        int(event_id),
+                        int(user_id),
+                        join_waitlist=False,
+                        payment_confirmed=True,
                     )
                     if isinstance(registration_response, dict) and "error" in registration_response:
                         current_app.logger.warning(

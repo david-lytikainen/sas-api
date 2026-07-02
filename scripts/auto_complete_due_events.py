@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 from app import create_app
 from app.services.event_service import EventService
-
-AUTO_COMPLETE_TIMEZONE = ZoneInfo("America/New_York")
 
 
 def main():
@@ -12,7 +9,7 @@ def main():
 
     with app.app_context():
         now_utc = datetime.now(timezone.utc)
-        now_est = now_utc.astimezone(AUTO_COMPLETE_TIMEZONE)
+        now_est = now_utc.astimezone(EventService.AUTO_COMPLETE_TIMEZONE)
 
         if now_est.hour < 9:
             app.logger.info(

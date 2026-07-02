@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import math
+from app.extensions import db
 from app.repositories.event_repository import EventRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.event_attendee_repository import EventAttendeeRepository
@@ -33,7 +34,7 @@ class EventService:
                 updated_count += 1
 
         if updated_count:
-            EventRepository.commit()
+            db.session.commit()
 
         return updated_count
 
@@ -139,7 +140,12 @@ class EventService:
         return event, None
 
     @staticmethod
-    def register_for_event(event_id: int, user_id: int, join_waitlist: bool = False):
+    def register_for_event(
+        event_id: int,
+        user_id: int,
+        join_waitlist: bool = False,
+        payment_confirmed: bool = False,
+    ):
         event, validation_error = EventService.validate_registration_for_event(
             event_id, user_id
         )
@@ -147,6 +153,16 @@ class EventService:
             if join_waitlist:
                 return EventService.join_event_waitlist(event_id, user_id)
             return validation_error
+
+        if (
+            not join_waitlist
+            and event.price_per_person
+            and Decimal(str(event.price_per_person)) > 0
+            and not payment_confirmed
+        ):
+            return {
+                "error": "Payment is required before registration. Please use Stripe Checkout to sign up for this event."
+            }
 
         EventAttendeeRepository.register_for_event(
             {
