@@ -34,7 +34,9 @@ def create_app():
 
     # Configure JWT
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your-secret-key")
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
+        days=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_DAYS", 365))
+    )
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
