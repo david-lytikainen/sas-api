@@ -10,7 +10,6 @@ class Event(db.Model):
     description = db.Column(db.Text, nullable=True)
     creator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     starts_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False)
-    event_timezone = db.Column(db.String(64), nullable=False, server_default="UTC")
     address = db.Column(db.String(255), nullable=False)
     max_capacity = db.Column(db.Integer, nullable=False)
     status = db.Column(
@@ -49,7 +48,6 @@ class Event(db.Model):
             "description": self.description,
             "creator_id": self.creator_id,
             "starts_at": self.starts_at.isoformat() if self.starts_at else None,
-            "event_timezone": self.event_timezone,
             "address": self.address,
             "max_capacity": self.max_capacity,
             "status": self.status,

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 import math
 from app.repositories.event_repository import EventRepository
@@ -10,49 +10,26 @@ from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models import Event
 from app.services.stripe_service import StripeService
 from typing import List
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 
 class EventService:
-    DEFAULT_EVENT_TIMEZONE = "UTC"
-
-    @staticmethod
-    def normalize_event_timezone(timezone_name: str | None) -> str:
-        normalized_timezone = timezone_name or EventService.DEFAULT_EVENT_TIMEZONE
-        try:
-            ZoneInfo(normalized_timezone)
-        except ZoneInfoNotFoundError as exc:
-            raise ValueError("Invalid event timezone.") from exc
-        return normalized_timezone
-
-    @staticmethod
-    def auto_complete_event_if_due(event: Event, now_utc: datetime | None = None) -> bool:
-        if not event or event.status != EventStatus.IN_PROGRESS.value or not event.starts_at:
-            return False
-
-        event_zone = ZoneInfo(
-            EventService.normalize_event_timezone(getattr(event, "event_timezone", None))
-        )
-        comparison_time = now_utc or datetime.now(timezone.utc)
-        localized_start = event.starts_at.astimezone(event_zone)
-        next_morning_local = localized_start.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) + timedelta(days=1)
-
-        if comparison_time >= next_morning_local.astimezone(timezone.utc):
-            event.status = EventStatus.COMPLETED.value
-            return True
-
-        return False
+    AUTO_COMPLETE_TIMEZONE = ZoneInfo("America/New_York")
 
     @staticmethod
     def auto_complete_due_events(now_utc: datetime | None = None) -> int:
         comparison_time = now_utc or datetime.now(timezone.utc)
+        comparison_time_est = comparison_time.astimezone(EventService.AUTO_COMPLETE_TIMEZONE)
         due_events = Event.query.filter_by(status=EventStatus.IN_PROGRESS.value).all()
         updated_count = 0
 
         for event in due_events:
-            if EventService.auto_complete_event_if_due(event, comparison_time):
+            if (
+                event.starts_at
+                and event.starts_at.astimezone(EventService.AUTO_COMPLETE_TIMEZONE).date()
+                < comparison_time_est.date()
+            ):
+                event.status = EventStatus.COMPLETED.value
                 updated_count += 1
 
         if updated_count:
@@ -70,7 +47,6 @@ class EventService:
         if not user:
             return ({"error": "User not found"}), 404
 
-        EventService.auto_complete_due_events()
         events = EventRepository.get_events()
         return [event.to_dict() for event in events]
 
@@ -99,7 +75,6 @@ class EventService:
                     "error": f"Minimum price per person is ${minimum_price} so your payout is not negative."
                 }, 400
 
-        event_timezone = EventService.normalize_event_timezone(data.get("event_timezone"))
         event = EventRepository.create_event(
             {
                 "name": data["name"],
@@ -108,7 +83,6 @@ class EventService:
                 "starts_at": datetime.fromisoformat(
                     data["starts_at"].replace("Z", "+00:00")
                 ).astimezone(timezone.utc),
-                "event_timezone": event_timezone,
                 "address": data["address"],
                 "max_capacity": data["max_capacity"],
                 "status": EventStatus.REGISTRATION_OPEN.value,
@@ -348,9 +322,6 @@ class EventService:
         if not event:
             return None, {"error": f"Event with ID {event_id} not found"}, 404
 
-        if EventService.auto_complete_event_if_due(event):
-            EventRepository.commit()
-
         user = UserRepository.find_by_id(user_id)
         if not user:
             return (
@@ -379,7 +350,6 @@ class EventService:
             "price_per_person",
             "status",
             "registration_deadline",
-            "event_timezone",
         ]
         update_data = {}
 
@@ -425,11 +395,6 @@ class EventService:
                     if value not in [s.value for s in EventStatus]:
                         return None, {"error": f"Invalid status value: {value}"}, 400
                     update_data[field] = value
-                elif field == "event_timezone":
-                    try:
-                        update_data[field] = EventService.normalize_event_timezone(value)
-                    except ValueError as exc:
-                        return None, {"error": str(exc)}, 400
                 else:
                     update_data[field] = value
 
