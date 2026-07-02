@@ -444,12 +444,9 @@ class EventService:
         ):
             raise UnauthorizedError("You are not authorized to delete this event.")
 
-        if (
-            event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]
-            and user.role_id != 3
-        ):
+        if event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]:
             return {
-                "error": f"Event is {event.status} and cannot be deleted by an organizer."
+                "error": f"Event is {event.status} and cannot be deleted."
             }, 400
 
         try:
