@@ -10,6 +10,7 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.models import Event
 from app.services.stripe_service import StripeService
+from app.utils.email import send_waitlist_spot_open_email
 from typing import List
 from zoneinfo import ZoneInfo
 
@@ -226,68 +227,48 @@ class EventService:
 
         EventAttendeeRepository.delete(event_id, user_id)
 
-        # Attempt to register the first person from the waitlist if a spot opened up
+        # Notify waitlisted users if a spot opened up so they can sign themselves up.
         EventService.process_waitlist_for_event(event_id)
 
         return {"message": "Successfully cancelled registration"}
 
     @staticmethod
     def process_waitlist_for_event(event_id: int):
-        """Checks if a spot has opened up and registers the first person from the waitlist."""
+        """Checks if a spot has opened up and notifies eligible waitlisted users."""
         event = EventRepository.get_event(event_id)
         if not event or event.status != EventStatus.REGISTRATION_OPEN.value:
-            return  # Only process for open events
+            return
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
+        if attendee_count >= event.max_capacity:
+            return
 
-        if attendee_count < event.max_capacity:
-            first_waitlisted = EventWaitlistRepository.get_first_in_waitlist(event_id)
-            if first_waitlisted:
-                first_waitlisted_user = UserRepository.find_by_id(
-                    first_waitlisted.user_id
-                )
-                if not first_waitlisted_user:
-                    return {
-                        "error": f"User with ID {first_waitlisted.user_id} not found"
-                    }
-                same_gender_count = (
-                    EventAttendeeRepository.count_by_event_and_status_and_gender(
-                        event_id,
-                        [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                        first_waitlisted_user.gender,
-                    )
-                )
+        gender_cap = math.floor(event.max_capacity * 0.6)
+        eligible_genders = {
+            Gender.MALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                event_id,
+                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                Gender.MALE,
+            )
+            < gender_cap,
+            Gender.FEMALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                event_id,
+                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                Gender.FEMALE,
+            )
+            < gender_cap,
+        }
 
-                # get the first waitlisted opposite gender if we have hit capacity
-                if same_gender_count >= math.floor(event.max_capacity * 0.6):
-                    other_gender = (
-                        Gender.MALE
-                        if first_waitlisted_user.gender == Gender.FEMALE
-                        else Gender.FEMALE
-                    )
-                    first_waitlisted = (
-                        EventWaitlistRepository.get_first_in_waitlist_by_gender(
-                            event_id, other_gender
-                        )
-                    )
-
-                try:
-                    EventAttendeeRepository.register_for_event(
-                        {
-                            "event_id": event_id,
-                            "user_id": first_waitlisted.user_id,
-                            "status": RegistrationStatus.REGISTERED,
-                        }
-                    )
-                    EventWaitlistRepository.remove_from_waitlist(
-                        event_id, first_waitlisted.user_id
-                    )
-                    # Optionally: Send a notification to the user they have been registered.
-                    # current_app.logger.info(f"User {first_waitlisted.user_id} registered from waitlist for event {event_id}")
-                except Exception:
-                    # current_app.logger.error(f"Error registering user {first_waitlisted.user_id} from waitlist for event {event_id}: {str(e)}")
-                    pass  # Keep them on waitlist if registration fails for some reason
+        waitlist_entries = EventWaitlistRepository.get_waitlist_for_event(event_id)
+        for entry in waitlist_entries:
+            waitlisted_user = UserRepository.find_by_id(entry.user_id)
+            if not waitlisted_user or not eligible_genders.get(waitlisted_user.gender, False):
+                continue
+            try:
+                send_waitlist_spot_open_email(waitlisted_user, event)
+            except Exception:
+                pass
 
     @staticmethod
     def check_in(event_id: int, user_id: int, pin: str):

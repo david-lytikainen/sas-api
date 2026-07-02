@@ -48,3 +48,34 @@ def send_password_reset_email(user):
     )
 
     Thread(target=send_async_email, args=(app, msg)).start()
+
+
+def send_waitlist_spot_open_email(user, event):
+    app = current_app._get_current_object()
+    signup_url = f"{app.config.get('CLIENT_URL')}/events?view=all"
+
+    if app.testing:
+        app.logger.info("--- MOCK EMAIL ---")
+        app.logger.info(f"To: {user.email}")
+        app.logger.info("Subject: Saved & Single Event Spot Opened")
+        app.logger.info(
+            f"Body: A spot opened for {event.name}. Visit {signup_url} to sign up now."
+        )
+        app.logger.info("--- END MOCK EMAIL ---")
+        return
+
+    msg = Message(
+        "A spot opened up for an event you are waitlisted on",
+        sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
+        recipients=[user.email],
+    )
+    msg.body = (
+        f"Hi {user.first_name},\n\n"
+        f"A spot has opened up for \"{event.name}\" on Saved & Single.\n"
+        "You are still on the waitlist, but you can go back into the site and sign up now if spots are still available.\n\n"
+        f"Open the site: {signup_url}\n\n"
+        "Spots are filling fast, so this is first come, first served.\n\n"
+        "Saved & Single"
+    )
+
+    Thread(target=send_async_email, args=(app, msg)).start()
