@@ -88,6 +88,9 @@ class EventService:
                 "address": data["address"],
                 "max_capacity": data["max_capacity"],
                 "status": EventStatus.REGISTRATION_OPEN.value,
+                "enforce_gender_balance": bool(
+                    data.get("enforce_gender_balance", True)
+                ),
                 "price_per_person": Decimal(str(data["price_per_person"])),
                 "registration_deadline": datetime.fromisoformat(
                     data["starts_at"].replace("Z", "+00:00")
@@ -125,18 +128,19 @@ class EventService:
         if not user:
             return None, {"error": f"User with ID {user_id} not found"}
 
-        same_gender_count = (
-            EventAttendeeRepository.count_by_event_and_status_and_gender(
-                event_id,
-                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                user.gender,
+        if event.enforce_gender_balance:
+            same_gender_count = (
+                EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    user.gender,
+                )
             )
-        )
-        if same_gender_count >= math.floor(event.max_capacity * 0.6):
-            return None, {
-                "error": "Event is currently full for this gender",
-                "waitlist_available": True,
-            }
+            if same_gender_count >= math.floor(event.max_capacity * 0.6):
+                return None, {
+                    "error": "Event is currently full for this gender",
+                    "waitlist_available": True,
+                }
 
         return event, None
 
@@ -244,21 +248,27 @@ class EventService:
         if attendee_count >= event.max_capacity:
             return
 
-        gender_cap = math.floor(event.max_capacity * 0.6)
-        eligible_genders = {
-            Gender.MALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
-                event_id,
-                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                Gender.MALE,
-            )
-            < gender_cap,
-            Gender.FEMALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
-                event_id,
-                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                Gender.FEMALE,
-            )
-            < gender_cap,
-        }
+        if event.enforce_gender_balance:
+            gender_cap = math.floor(event.max_capacity * 0.6)
+            eligible_genders = {
+                Gender.MALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    Gender.MALE,
+                )
+                < gender_cap,
+                Gender.FEMALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    Gender.FEMALE,
+                )
+                < gender_cap,
+            }
+        else:
+            eligible_genders = {
+                Gender.MALE: True,
+                Gender.FEMALE: True,
+            }
 
         waitlist_entries = EventWaitlistRepository.get_waitlist_for_event(event_id)
         for entry in waitlist_entries:
@@ -347,6 +357,7 @@ class EventService:
             "price_per_person",
             "status",
             "registration_deadline",
+            "enforce_gender_balance",
         ]
         update_data = {}
 
