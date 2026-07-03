@@ -101,3 +101,9 @@ class EventAttendeeRepository:
             db.session.rollback()
             # current_app.logger.error(f"Error updating registration status for attendee {registration.id}: {str(e)}")
             return None
+
+    @staticmethod
+    def save(registration: EventAttendee):
+        db.session.add(registration)
+        db.session.commit()
+        return registration

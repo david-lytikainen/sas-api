@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from calendar import monthrange
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import math
 from app.extensions import db
@@ -8,15 +9,24 @@ from app.repositories.event_attendee_repository import EventAttendeeRepository
 from app.repositories.event_waitlist_repository import EventWaitlistRepository
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.models.enums import EventStatus, Gender, RegistrationStatus
-from app.models import Event
+from app.models import Event, EventAttendee
 from app.services.stripe_service import StripeService
-from app.utils.email import send_waitlist_spot_open_email
+from app.utils.email import (
+    send_event_registration_confirmation_email,
+    send_event_reminder_email,
+    send_waitlist_spot_open_email,
+)
 from typing import List
 from zoneinfo import ZoneInfo
 
 
 class EventService:
     AUTO_COMPLETE_TIMEZONE = ZoneInfo("America/New_York")
+    REMINDER_FIELD_MAP = {
+        "1 month": "reminder_one_month_sent_at",
+        "1 week": "reminder_one_week_sent_at",
+        "1 day": "reminder_one_day_sent_at",
+    }
 
     @staticmethod
     def auto_complete_due_events(now_utc: datetime | None = None) -> int:
@@ -169,13 +179,14 @@ class EventService:
                 "error": "Payment is required before registration. Please use Stripe Checkout to sign up for this event."
             }
 
-        EventAttendeeRepository.register_for_event(
+        registration = EventAttendeeRepository.register_for_event(
             {
                 "event_id": event_id,
                 "user_id": user_id,
                 "status": RegistrationStatus.REGISTERED,
             }
         )
+        EventService.send_registration_confirmation(event, registration)
 
         return {"message": "Successfully registered for event"}
 
@@ -235,6 +246,85 @@ class EventService:
         EventService.process_waitlist_for_event(event_id)
 
         return {"message": "Successfully cancelled registration"}
+
+    @staticmethod
+    def send_registration_confirmation(event: Event, registration: EventAttendee):
+        if registration.registration_confirmation_sent_at:
+            return
+
+        attendee = UserRepository.find_by_id(registration.user_id)
+        organizer = UserRepository.find_by_id(event.creator_id)
+        if not attendee or not organizer:
+            return
+
+        send_event_registration_confirmation_email(attendee, event, organizer)
+        registration.registration_confirmation_sent_at = datetime.now(timezone.utc)
+        EventAttendeeRepository.save(registration)
+
+    @staticmethod
+    def send_due_event_reminders(now_utc: datetime | None = None) -> int:
+        comparison_time = now_utc or datetime.now(timezone.utc)
+        comparison_time_est = comparison_time.astimezone(EventService.AUTO_COMPLETE_TIMEZONE)
+        comparison_date_est = comparison_time_est.date()
+
+        registrations = (
+            db.session.query(EventAttendee, Event)
+            .join(Event, EventAttendee.event_id == Event.id)
+            .filter(
+                EventAttendee.status.in_(
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                ),
+                Event.status == EventStatus.REGISTRATION_OPEN.value,
+                Event.starts_at > comparison_time,
+            )
+            .all()
+        )
+
+        sent_count = 0
+        for registration, event in registrations:
+            reminder_label = EventService.get_due_reminder_label(
+                event.starts_at.astimezone(EventService.AUTO_COMPLETE_TIMEZONE).date(),
+                comparison_date_est,
+            )
+            if not reminder_label:
+                continue
+
+            reminder_field = EventService.REMINDER_FIELD_MAP[reminder_label]
+            if getattr(registration, reminder_field):
+                continue
+
+            attendee = UserRepository.find_by_id(registration.user_id)
+            organizer = UserRepository.find_by_id(event.creator_id)
+            if not attendee or not organizer:
+                continue
+
+            send_event_reminder_email(attendee, event, organizer, reminder_label)
+            setattr(registration, reminder_field, comparison_time)
+            db.session.add(registration)
+            sent_count += 1
+
+        if sent_count:
+            db.session.commit()
+
+        return sent_count
+
+    @staticmethod
+    def get_due_reminder_label(event_date: date, comparison_date: date) -> str | None:
+        if event_date == comparison_date + timedelta(days=1):
+            return "1 day"
+        if event_date == comparison_date + timedelta(days=7):
+            return "1 week"
+        if event_date == EventService.add_months(comparison_date, 1):
+            return "1 month"
+        return None
+
+    @staticmethod
+    def add_months(value: date, months: int) -> date:
+        month_index = value.month - 1 + months
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(value.day, monthrange(year, month)[1])
+        return date(year, month, day)
 
     @staticmethod
     def process_waitlist_for_event(event_id: int):
