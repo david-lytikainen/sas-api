@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from flask import current_app
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 user_bp = Blueprint("user", __name__)
 
@@ -174,6 +174,58 @@ def build_admin_tools_payload():
     }
 
 
+def build_health_payload():
+    health_status = 200
+    database_ok = True
+    database_error = None
+    scheduler_error = None
+
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception as exc:
+        database_ok = False
+        database_error = str(exc)
+        health_status = 503
+
+    latest_auto_complete_run = None
+    if database_ok:
+        try:
+            latest_auto_complete_run = (
+                SchedulerJobRun.query.filter_by(job_name="auto-complete-due-events")
+                .order_by(SchedulerJobRun.created_at.desc())
+                .first()
+            )
+        except Exception as exc:
+            scheduler_error = str(exc)
+
+    return {
+        "status": "ok" if database_ok else "degraded",
+        "time": datetime.utcnow().isoformat() + "Z",
+        "database": {
+            "ok": database_ok,
+            "error": database_error,
+        },
+        "scheduler": {
+            "embedded_enabled": "embedded_scheduler" in current_app.extensions,
+            "error": scheduler_error,
+            "latest_auto_complete_run": (
+                {
+                    "status": latest_auto_complete_run.status,
+                    "processed_count": latest_auto_complete_run.processed_count,
+                    "error_message": latest_auto_complete_run.error_message,
+                    "created_at": (
+                        latest_auto_complete_run.created_at.isoformat()
+                        if latest_auto_complete_run.created_at
+                        else None
+                    ),
+                }
+                if latest_auto_complete_run
+                else None
+            ),
+        },
+    }, health_status
+
+
 def sign_up_user(user_data):
     existing_user = find_user_by_email(user_data["email"])
     if existing_user:
@@ -238,6 +290,12 @@ def reset_user_password(token, new_password):
     user.reset_token_expiration = None
     db.session.commit()
     return {"message": "Your password has been reset successfully."}
+
+
+@user_bp.route("/health", methods=["GET"])
+def health_check():
+    payload, status_code = build_health_payload()
+    return jsonify(payload), status_code
 
 
 def update_profile(user: User, data):

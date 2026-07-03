@@ -41,8 +41,6 @@ def create_app():
     # Configure database
     app.config["SQLALCHEMY_DATABASE_URI"] = _require_env("DATABASE_URL")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["LIMITER_DATABASE_URI"] = _require_env("LIMITER_DATABASE_URL")
-
     # Configure JWT
     app.config["JWT_SECRET_KEY"] = _require_env("JWT_SECRET_KEY")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
@@ -86,7 +84,6 @@ def create_app():
         get_remote_address,
         app=app,
         default_limits=["150 per minute, 10000 per hour, 100000 per day"],
-        storage_uri=app.config["LIMITER_DATABASE_URI"],
         strategy="fixed-window",
     )
 

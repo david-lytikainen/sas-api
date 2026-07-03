@@ -16,7 +16,6 @@ from app.services.event_service import EventService
 _scheduler_lock = Lock()
 _scheduler: Optional[BackgroundScheduler] = None
 _AUTO_COMPLETE_LOCK_KEY = 90412025
-_REMINDER_LOCK_KEY = 90412026
 
 
 def start_embedded_scheduler(app):
@@ -56,22 +55,12 @@ def start_embedded_scheduler(app):
             max_instances=1,
             misfire_grace_time=60 * 60,
         )
-        scheduler.add_job(
-            _run_due_event_reminders,
-            CronTrigger(hour=21, minute=0),
-            args=[app],
-            id="send-due-event-reminders",
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
-            misfire_grace_time=60 * 60,
-        )
         scheduler.start()
         atexit.register(_shutdown_scheduler)
         _scheduler = scheduler
         app.extensions["embedded_scheduler"] = scheduler
         app.logger.info(
-            "Embedded scheduler started for daily 9:00 AM auto-complete and 9:00 PM reminder jobs in Eastern time."
+            "Embedded scheduler started for the daily 9:00 AM Eastern auto-complete job."
         )
         return scheduler
 
@@ -115,40 +104,6 @@ def _run_due_event_auto_complete(app):
             raise
         finally:
             _release_job_lock(lock_connection, _AUTO_COMPLETE_LOCK_KEY)
-
-
-def _run_due_event_reminders(app):
-    with app.app_context():
-        lock_connection = _acquire_job_lock(_REMINDER_LOCK_KEY)
-        if lock_connection is None:
-            app.logger.info(
-                "Skipped due-event reminders because another app process holds the scheduler lock."
-            )
-            return
-
-        try:
-            reminder_count = EventService.send_due_event_reminders(
-                datetime.now(timezone.utc)
-            )
-            _record_scheduler_job_run(
-                "send-due-event-reminders", "success", reminder_count
-            )
-            app.logger.info(
-                "Embedded scheduler sent %s due event reminder(s).",
-                reminder_count,
-            )
-        except Exception as exc:
-            _record_scheduler_job_run(
-                "send-due-event-reminders", "failed", 0, str(exc)
-            )
-            app.logger.error(
-                "Embedded scheduler failed during due-event reminders: %s",
-                str(exc),
-                exc_info=True,
-            )
-            raise
-        finally:
-            _release_job_lock(lock_connection, _REMINDER_LOCK_KEY)
 
 
 def _acquire_job_lock(lock_key: int):
