@@ -22,10 +22,6 @@ class StripeService:
 
     @staticmethod
     def require_configured():
-        if not StripeService.is_configured():
-            raise ValueError(
-                "Stripe is not configured. TODO: set Stripe env vars in backend."
-            )
         StripeService.configure()
 
     @staticmethod
@@ -285,5 +281,5 @@ class StripeService:
         StripeService.require_configured()
         webhook_secret = current_app.config.get("STRIPE_WEBHOOK_SECRET")
         if not webhook_secret:
-            raise ValueError("Stripe webhook secret is missing. TODO: set STRIPE_WEBHOOK_SECRET.")
+            raise ValueError("Stripe webhook secret is missing.")
         return stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
