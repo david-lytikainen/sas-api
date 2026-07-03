@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, make_response
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import User
+from app.models import Event, EventPayment, SchedulerJobRun, User
 from app.models.enums import Gender
 from app.models.church import Church
 from app.extensions import db
@@ -12,6 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from flask import current_app
 from datetime import datetime
+from sqlalchemy import func
 
 user_bp = Blueprint("user", __name__)
 
@@ -22,6 +23,155 @@ def find_user_by_email(email):
 
 def serialize_user(user: User):
     return {"user": user.to_dict()}
+
+
+def cents_to_dollars(total_cents: int | None) -> str:
+    return f"{((total_cents or 0) / 100):.2f}"
+
+
+def build_billing_summary(organizer_user_id: int):
+    payments = EventPayment.query.filter_by(organizer_user_id=organizer_user_id).all()
+    gross_cents = sum(payment.amount_cents for payment in payments)
+    refunded_cents = sum(payment.refunded_amount_cents for payment in payments)
+    successful_registrations = sum(
+        1 for payment in payments if payment.registration_status == "registered"
+    )
+    refund_failures = sum(1 for payment in payments if payment.refund_status == "failed")
+    payment_mismatches = sum(
+        1
+        for payment in payments
+        if payment.registration_status in {"registration_failed", "refund_failed"}
+    )
+
+    event_ids = {payment.event_id for payment in payments}
+    event_map = {
+        event.id: event
+        for event in Event.query.filter(Event.id.in_(event_ids)).all()
+    } if event_ids else {}
+    user_ids = {payment.user_id for payment in payments}
+    user_map = {
+        user.id: user for user in User.query.filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    recent_payments = sorted(
+        payments,
+        key=lambda payment: payment.created_at.timestamp()
+        if payment.created_at
+        else 0,
+        reverse=True,
+    )[:5]
+    recent_activity = [
+        {
+            "event_name": event_map.get(payment.event_id).name if event_map.get(payment.event_id) else "Unknown event",
+            "attendee_name": (
+                f"{user_map[payment.user_id].first_name} {user_map[payment.user_id].last_name}"
+                if payment.user_id in user_map
+                else "Unknown attendee"
+            ),
+            "amount": cents_to_dollars(payment.amount_cents),
+            "payment_status": payment.payment_status,
+            "registration_status": payment.registration_status,
+            "refund_status": payment.refund_status,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None,
+        }
+        for payment in recent_payments
+    ]
+
+    return {
+        "gross_amount": cents_to_dollars(gross_cents),
+        "refunded_amount": cents_to_dollars(refunded_cents),
+        "net_amount": cents_to_dollars(gross_cents - refunded_cents),
+        "successful_registrations": successful_registrations,
+        "refund_failures": refund_failures,
+        "payment_mismatches": payment_mismatches,
+        "recent_activity": recent_activity,
+    }
+
+
+def build_admin_billing_overview():
+    organizer_rows = (
+        db.session.query(
+            User.id,
+            User.first_name,
+            User.last_name,
+            User.email,
+            User.stripe_connect_onboarding_complete,
+            func.coalesce(func.sum(EventPayment.amount_cents), 0),
+            func.coalesce(func.sum(EventPayment.refunded_amount_cents), 0),
+        )
+        .outerjoin(EventPayment, EventPayment.organizer_user_id == User.id)
+        .filter(User.role_id == 2)
+        .group_by(
+            User.id,
+            User.first_name,
+            User.last_name,
+            User.email,
+            User.stripe_connect_onboarding_complete,
+        )
+        .order_by(User.first_name.asc(), User.last_name.asc())
+        .all()
+    )
+
+    return [
+        {
+            "organizer_id": organizer_id,
+            "organizer_name": f"{first_name} {last_name}".strip(),
+            "organizer_email": email,
+            "onboarding_complete": bool(onboarding_complete),
+            "gross_amount": cents_to_dollars(gross_cents),
+            "net_amount": cents_to_dollars(gross_cents - refunded_cents),
+        }
+        for organizer_id, first_name, last_name, email, onboarding_complete, gross_cents, refunded_cents in organizer_rows
+    ]
+
+
+def build_admin_tools_payload():
+    latest_runs = (
+        db.session.query(
+            SchedulerJobRun.job_name,
+            func.max(SchedulerJobRun.created_at).label("latest_created_at"),
+        )
+        .group_by(SchedulerJobRun.job_name)
+        .subquery()
+    )
+
+    latest_status_rows = (
+        db.session.query(SchedulerJobRun)
+        .join(
+            latest_runs,
+            (SchedulerJobRun.job_name == latest_runs.c.job_name)
+            & (SchedulerJobRun.created_at == latest_runs.c.latest_created_at),
+        )
+        .order_by(SchedulerJobRun.job_name.asc())
+        .all()
+    )
+    recent_failures = (
+        SchedulerJobRun.query.filter_by(status="failed")
+        .order_by(SchedulerJobRun.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "latest_runs": [
+            {
+                "job_name": run.job_name,
+                "status": run.status,
+                "processed_count": run.processed_count,
+                "error_message": run.error_message,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+            }
+            for run in latest_status_rows
+        ],
+        "recent_failures": [
+            {
+                "job_name": run.job_name,
+                "error_message": run.error_message,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+            }
+            for run in recent_failures
+        ],
+    }
 
 
 def sign_up_user(user_data):
@@ -260,6 +410,42 @@ def user_profile():
         return jsonify({"error": "Failed to update profile"}), 500
 
 
+@user_bp.route("/profile/dashboard", methods=["GET"])
+@jwt_required()
+def user_profile_dashboard():
+    current_user_id = get_jwt_identity()
+
+    try:
+        current_user = User.query.get_or_404(current_user_id)
+        can_view_billing = current_user.role_id in {2, 3}
+
+        dashboard = {
+            "billing": None,
+            "admin_tools": None,
+        }
+        if can_view_billing:
+            dashboard["billing"] = {
+                "own_summary": build_billing_summary(current_user.id),
+                "stripe_connected_account_id": current_user.stripe_connected_account_id,
+                "stripe_connect_onboarding_complete": bool(
+                    current_user.stripe_connect_onboarding_complete
+                ),
+                "organizer_overview": build_admin_billing_overview()
+                if current_user.role_id == 3
+                else [],
+            }
+        if current_user.role_id == 3:
+            dashboard["admin_tools"] = build_admin_tools_payload()
+
+        return jsonify(dashboard), 200
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to load profile dashboard for user {current_user_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to load profile dashboard"}), 500
+
+
 @user_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
     try:
@@ -370,6 +556,13 @@ def stripe_webhook():
             if checkout_type == "event_registration":
                 user_id = metadata.get("user_id")
                 event_id = metadata.get("event_id")
+                payment = StripeService.upsert_checkout_session_payment(data_object)
+                if payment and payment.registration_status in {
+                    "registered",
+                    "registration_failed_refunded",
+                    "refund_failed",
+                }:
+                    return jsonify({"received": True}), 200
                 user = User.query.get(int(user_id)) if user_id else None
                 if user:
                     user.stripe_customer_id = data_object.get("customer")
@@ -383,9 +576,41 @@ def stripe_webhook():
                         payment_confirmed=True,
                     )
                     if isinstance(registration_response, dict) and "error" in registration_response:
+                        failure_reason = registration_response["error"]
+                        if payment:
+                            payment.registration_status = "registration_failed"
+                            payment.failure_reason = failure_reason
+                            db.session.add(payment)
+                            db.session.commit()
+                        if payment:
+                            try:
+                                payment = StripeService.refund_payment(payment, failure_reason)
+                                payment.registration_status = "registration_failed_refunded"
+                                db.session.add(payment)
+                                db.session.commit()
+                            except Exception as refund_error:
+                                db.session.rollback()
+                                current_app.logger.error(
+                                    "Automatic refund failed for checkout session %s: %s",
+                                    data_object.get("id"),
+                                    str(refund_error),
+                                    exc_info=True,
+                                )
+                                if payment:
+                                    payment.refund_status = "failed"
+                                    payment.registration_status = "refund_failed"
+                                    payment.failure_reason = (
+                                        f"{failure_reason} | Refund error: {str(refund_error)}"
+                                    )
+                                    db.session.add(payment)
+                                    db.session.commit()
                         current_app.logger.warning(
                             f"Paid checkout completed but registration failed for user {user_id} event {event_id}: {registration_response['error']}"
-                        )  # TODO: manual refund path if this happens
+                        )
+                    elif payment:
+                        payment.registration_status = "registered"
+                        db.session.add(payment)
+                        db.session.commit()
 
         elif event_type == "account.updated":
             metadata = data_object.get("metadata") or {}

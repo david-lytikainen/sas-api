@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text
 
 from app.extensions import db
+from app.models import SchedulerJobRun
 from app.services.event_service import EventService
 
 
@@ -95,10 +96,23 @@ def _run_due_event_auto_complete(app):
             completed_count = EventService.auto_complete_due_events(
                 datetime.now(timezone.utc)
             )
+            _record_scheduler_job_run(
+                "auto-complete-due-events", "success", completed_count
+            )
             app.logger.info(
                 "Embedded scheduler auto-completed %s due event(s).",
                 completed_count,
             )
+        except Exception as exc:
+            _record_scheduler_job_run(
+                "auto-complete-due-events", "failed", 0, str(exc)
+            )
+            app.logger.error(
+                "Embedded scheduler failed during due-event auto-complete: %s",
+                str(exc),
+                exc_info=True,
+            )
+            raise
         finally:
             _release_job_lock(lock_connection, _AUTO_COMPLETE_LOCK_KEY)
 
@@ -116,10 +130,23 @@ def _run_due_event_reminders(app):
             reminder_count = EventService.send_due_event_reminders(
                 datetime.now(timezone.utc)
             )
+            _record_scheduler_job_run(
+                "send-due-event-reminders", "success", reminder_count
+            )
             app.logger.info(
                 "Embedded scheduler sent %s due event reminder(s).",
                 reminder_count,
             )
+        except Exception as exc:
+            _record_scheduler_job_run(
+                "send-due-event-reminders", "failed", 0, str(exc)
+            )
+            app.logger.error(
+                "Embedded scheduler failed during due-event reminders: %s",
+                str(exc),
+                exc_info=True,
+            )
+            raise
         finally:
             _release_job_lock(lock_connection, _REMINDER_LOCK_KEY)
 
@@ -160,3 +187,20 @@ def _shutdown_scheduler():
         if _scheduler and _scheduler.running:
             _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+def _record_scheduler_job_run(
+    job_name: str, status: str, processed_count: int, error_message: str | None = None
+):
+    try:
+        db.session.add(
+            SchedulerJobRun(
+                job_name=job_name,
+                status=status,
+                processed_count=processed_count,
+                error_message=error_message,
+            )
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()

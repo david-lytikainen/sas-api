@@ -2,7 +2,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import stripe
 from flask import current_app
 from app.extensions import db
-from app.models import Event, User
+from app.models import Event, EventPayment, User
 
 
 class StripeService:
@@ -221,6 +221,64 @@ class StripeService:
             },
         )
         return session.url
+
+    @staticmethod
+    def upsert_checkout_session_payment(session_data: dict) -> EventPayment | None:
+        metadata = session_data.get("metadata") or {}
+        checkout_type = metadata.get("checkout_type")
+        if checkout_type != "event_registration":
+            return None
+
+        session_id = session_data.get("id")
+        event_id = metadata.get("event_id")
+        user_id = metadata.get("user_id")
+        organizer_user_id = metadata.get("organizer_user_id")
+        if not all([session_id, event_id, user_id, organizer_user_id]):
+            return None
+
+        payment = EventPayment.query.filter_by(
+            stripe_checkout_session_id=session_id
+        ).first()
+        if not payment:
+            payment = EventPayment(stripe_checkout_session_id=session_id)
+
+        payment.stripe_payment_intent_id = session_data.get("payment_intent")
+        payment.event_id = int(event_id)
+        payment.user_id = int(user_id)
+        payment.organizer_user_id = int(organizer_user_id)
+        payment.amount_cents = int(session_data.get("amount_total") or 0)
+        payment.currency = (session_data.get("currency") or "usd").lower()
+        payment.payment_status = session_data.get("payment_status") or "paid"
+        payment.registration_status = payment.registration_status or "pending"
+
+        db.session.add(payment)
+        db.session.commit()
+        return payment
+
+    @staticmethod
+    def refund_payment(payment: EventPayment, reason: str) -> EventPayment:
+        StripeService.require_configured()
+        if not payment.stripe_payment_intent_id:
+            raise ValueError("Missing Stripe payment intent for refund.")
+
+        refund = stripe.Refund.create(
+            payment_intent=payment.stripe_payment_intent_id,
+            reason="requested_by_customer",
+            metadata={
+                "event_payment_id": str(payment.id),
+                "event_id": str(payment.event_id),
+                "user_id": str(payment.user_id),
+                "failure_reason": reason[:400],
+            },
+        )
+        payment.stripe_refund_id = refund.id
+        payment.refund_status = refund.status
+        payment.refunded_amount_cents = int(refund.amount or 0)
+        payment.registration_status = "registration_failed_refunded"
+        payment.failure_reason = reason
+        db.session.add(payment)
+        db.session.commit()
+        return payment
 
     @staticmethod
     def construct_webhook_event(payload: bytes, sig_header: str):
