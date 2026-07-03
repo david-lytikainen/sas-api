@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from calendar import monthrange
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import math
 from app.extensions import db
@@ -12,6 +13,7 @@ from app.models import Event, EventAttendee
 from app.services.stripe_service import StripeService
 from app.utils.email import (
     send_event_registration_confirmation_email,
+    send_event_reminder_email,
     send_waitlist_spot_open_email,
 )
 from typing import List
@@ -253,6 +255,64 @@ class EventService:
         send_event_registration_confirmation_email(attendee, event, organizer)
         registration.registration_confirmation_sent_at = datetime.now(timezone.utc)
         EventAttendeeRepository.save(registration)
+
+    @staticmethod
+    def send_due_event_reminders(now_utc: datetime | None = None) -> int:
+        comparison_time = now_utc or datetime.now(timezone.utc)
+        comparison_time_est = comparison_time.astimezone(
+            EventService.AUTO_COMPLETE_TIMEZONE
+        )
+        comparison_date_est = comparison_time_est.date()
+
+        registrations = (
+            db.session.query(EventAttendee, Event)
+            .join(Event, EventAttendee.event_id == Event.id)
+            .filter(
+                EventAttendee.status.in_(
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                ),
+                Event.status == EventStatus.REGISTRATION_OPEN.value,
+                Event.starts_at > comparison_time,
+            )
+            .all()
+        )
+
+        sent_count = 0
+        for registration, event in registrations:
+            reminder_label = EventService.get_due_reminder_label(
+                event.starts_at.astimezone(EventService.AUTO_COMPLETE_TIMEZONE).date(),
+                comparison_date_est,
+            )
+            if not reminder_label:
+                continue
+
+            attendee = UserRepository.find_by_id(registration.user_id)
+            organizer = UserRepository.find_by_id(event.creator_id)
+            if not attendee or not organizer:
+                continue
+
+            send_event_reminder_email(attendee, event, organizer, reminder_label)
+            sent_count += 1
+
+        return sent_count
+
+    @staticmethod
+    def get_due_reminder_label(event_date: date, comparison_date: date) -> str | None:
+        if event_date == comparison_date + timedelta(days=1):
+            return "1 day"
+        if event_date == comparison_date + timedelta(days=7):
+            return "1 week"
+        if event_date == EventService.add_months(comparison_date, 1):
+            return "1 month"
+        return None
+
+    @staticmethod
+    def add_months(value: date, months: int) -> date:
+        month_index = value.month - 1 + months
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(value.day, monthrange(year, month)[1])
+        return date(year, month, day)
 
     @staticmethod
     def process_waitlist_for_event(event_id: int):

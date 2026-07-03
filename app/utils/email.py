@@ -120,3 +120,40 @@ def send_event_registration_confirmation_email(user, event, organizer):
 
     Thread(target=send_async_email, args=(app, msg)).start()
 
+
+def send_event_reminder_email(user, event, organizer, reminder_label: str):
+    app = current_app._get_current_object()
+    event_url = f"{app.config.get('CLIENT_URL')}/events?view=all"
+    event_time = event.starts_at.astimezone(EMAIL_TIMEZONE).strftime(
+        "%A, %B %-d, %Y at %-I:%M %p %Z"
+    )
+    organizer_name = f"{organizer.first_name} {organizer.last_name}".strip()
+
+    if app.testing:
+        app.logger.info("--- MOCK EMAIL ---")
+        app.logger.info(f"To: {user.email}")
+        app.logger.info(f"Subject: Saved & Single Event Reminder ({reminder_label})")
+        app.logger.info(
+            f'Body: Reminder for {event.name} on {event_time}. Open {event_url}.'
+        )
+        app.logger.info("--- END MOCK EMAIL ---")
+        return
+
+    msg = Message(
+        f"Saved & Single reminder: {event.name}",
+        sender=("Saved & Single", app.config.get("MAIL_USERNAME")),
+        recipients=[user.email],
+    )
+    msg.body = (
+        f"Hi {user.first_name},\n\n"
+        f'This is your {reminder_label} reminder for "{event.name}" on Saved & Single.\n\n'
+        f"Event date and time: {event_time}\n"
+        f"Address: {event.address}\n"
+        f"Organizer: {organizer_name}\n"
+        f"Organizer email: {organizer.email}\n\n"
+        "If your plans change, you can cancel through the website, but refunds are not handled through the app.\n\n"
+        f"Open the site: {event_url}\n\n"
+        "Saved & Single"
+    )
+
+    Thread(target=send_async_email, args=(app, msg)).start()
