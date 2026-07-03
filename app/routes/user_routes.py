@@ -12,10 +12,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from flask import current_app
 from datetime import datetime
-import logging
 
 user_bp = Blueprint("user", __name__)
-logger = logging.getLogger(__name__)
 
 
 def find_user_by_email(email):
