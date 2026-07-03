@@ -181,7 +181,10 @@ class EventService:
                 "status": RegistrationStatus.REGISTERED,
             }
         )
-        EventService.send_registration_confirmation(event, registration)
+        attendee = UserRepository.find_by_id(registration.user_id)
+        organizer = UserRepository.find_by_id(event.creator_id)
+        if attendee and organizer:
+            send_event_registration_confirmation_email(attendee, event, organizer)
 
         return {"message": "Successfully registered for event"}
 
@@ -241,20 +244,6 @@ class EventService:
         EventService.process_waitlist_for_event(event_id)
 
         return {"message": "Successfully cancelled registration"}
-
-    @staticmethod
-    def send_registration_confirmation(event: Event, registration: EventAttendee):
-        if registration.registration_confirmation_sent_at:
-            return
-
-        attendee = UserRepository.find_by_id(registration.user_id)
-        organizer = UserRepository.find_by_id(event.creator_id)
-        if not attendee or not organizer:
-            return
-
-        send_event_registration_confirmation_email(attendee, event, organizer)
-        registration.registration_confirmation_sent_at = datetime.now(timezone.utc)
-        EventAttendeeRepository.save(registration)
 
     @staticmethod
     def send_due_event_reminders(now_utc: datetime | None = None) -> int:
