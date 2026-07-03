@@ -11,7 +11,7 @@ from app.services.event_service import EventService
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token
 from flask import current_app
-from datetime import timedelta, datetime
+from datetime import datetime
 import logging
 
 user_bp = Blueprint("user", __name__)
@@ -54,7 +54,7 @@ def sign_up_user(user_data):
 
     db.session.add(user)
     db.session.commit()
-    access_token = create_access_token(identity=user.id, expires_delta=timedelta(days=1))
+    access_token = create_access_token(identity=str(user.id))
     return {"token": access_token, "user": user.to_dict()}
 
 
@@ -65,7 +65,7 @@ def sign_in_user(email, password):
     if not check_password_hash(user.password, password):
         raise ValueError("Invalid password")
 
-    access_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+    access_token = create_access_token(identity=str(user.id))
     return {"token": access_token, "user": user.to_dict()}
 
 
