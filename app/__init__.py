@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from app.extensions import db, migrate, jwt
+from app.extensions import db, jwt
 from app.utils.email import mail
 from datetime import timedelta
 import logging
@@ -89,7 +89,6 @@ def create_app():
 
     # Initialize Flask extensions
     db.init_app(app)
-    migrate.init_app(app, db)
     jwt.init_app(app)
     mail.init_app(app)
 
