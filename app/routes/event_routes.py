@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from app.models.church import Church
 from app.models.event import Event
 from app.models.user import User
@@ -16,7 +16,6 @@ from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
 from app.utils.churches import resolve_church_id
 from datetime import datetime, timedelta, timezone
-from flask import current_app
 from sqlalchemy import or_
 
 event_bp = Blueprint("event", __name__)
@@ -222,7 +221,9 @@ def get_event_by_id(event_id):
 
         return jsonify(event_data)
     except Exception as e:
-        print(f"Error fetching event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error fetching event {event_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Failed to fetch event details"}), 500
 
 
@@ -244,7 +245,7 @@ def create_event():
         return jsonify({"error": "Unauthorized"}), 403
     except Exception as e:
         db.session.rollback()
-        print(f"Error creating event: {str(e)}")
+        current_app.logger.error(f"Error creating event: {str(e)}", exc_info=True)
         return jsonify({"error": f"Failed to create event: {e}"}), 500
 
 
@@ -511,7 +512,10 @@ def update_event_status(event_id):
         return jsonify({"message": "Event status updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
-        print(f"Error in update_event_status: {str(e)}")
+        current_app.logger.error(
+            f"Error in update_event_status for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": f"Error updating status: {str(e)}"}), 500
 
 
@@ -581,7 +585,10 @@ def get_event_attendees(event_id):
 
         return jsonify(attendee_data), 200
     except Exception as e:
-        print(f"Error in get_event_attendees: {str(e)}")
+        current_app.logger.error(
+            f"Error in get_event_attendees for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": f"Error retrieving attendees: {str(e)}"}), 500
 
 
@@ -641,7 +648,14 @@ def update_attendee_details(event_id, attendee_id):
             updated_fields.append("last_name")
 
         if "email" in data and data["email"]:
-            user_to_update.email = data["email"]
+            normalized_email = data["email"].strip().lower()
+            existing_user = User.query.filter_by(email=normalized_email).first()
+            if existing_user and existing_user.id != user_to_update.id:
+                return (
+                    jsonify({"error": "An account already exists for this email."}),
+                    400,
+                )
+            user_to_update.email = normalized_email
             updated_fields.append("email")
 
         if "gender" in data and data["gender"]:
@@ -712,7 +726,10 @@ def update_attendee_details(event_id, attendee_id):
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating attendee details: {str(e)}")
+        current_app.logger.error(
+            f"Error updating attendee details for event {event_id}, attendee {attendee_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
 
 
@@ -776,8 +793,9 @@ def get_schedule(event_id):
         return jsonify({"schedule": schedule}), 200
 
     except Exception as e:
-        print(
-            f"Error retrieving schedule for event {event_id}, user {current_user_id}: {str(e)}"
+        current_app.logger.error(
+            f"Error retrieving schedule for event {event_id}, user {current_user_id}: {str(e)}",
+            exc_info=True,
         )
         return jsonify({"error": "Failed to retrieve schedule"}), 500
 
@@ -821,7 +839,10 @@ def get_all_schedules(event_id):
         return jsonify({"schedules": schedules}), 200
 
     except Exception as e:
-        print(f"Error retrieving all schedules for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error retrieving all schedules for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to retrieve schedules"}), 500
 
 
@@ -841,7 +862,10 @@ def get_timer_status(event_id):
             return jsonify(None), 200
         return jsonify(timer.to_dict()), 200
     except Exception as e:
-        print(f"Error retrieving timer status for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error retrieving timer status for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to retrieve timer status"}), 500
 
 
@@ -863,7 +887,9 @@ def start_round(event_id):
         return jsonify({"timer": timer.to_dict(), "message": f"Round {timer.current_round} started"}), 200
 
     except Exception as e:
-        print(f"Error starting round for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error starting round for event {event_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Failed to start round"}), 500
 
 
@@ -886,7 +912,9 @@ def end_round(event_id):
         return jsonify(timer.to_dict()), 200
 
     except Exception as e:
-        print(f"Error end round for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error ending round for event {event_id}: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Failed to end round"}), 500
 
 
@@ -997,7 +1025,10 @@ def next_round(event_id):
         return jsonify({"timer": timer.to_dict(), "message": f"Advanced to round {timer.current_round}"}), 200
 
     except Exception as e:
-        print(f"Error advancing to next round for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error advancing to next round for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to advance to next round"}), 500
 
 
@@ -1051,7 +1082,10 @@ def update_round_duration(event_id):
         return jsonify({"timer": timer.to_dict(), "message": "Timer duration updated"}), 200
 
     except Exception as e:
-        print(f"Error updating round duration for event {event_id}: {str(e)}")
+        current_app.logger.error(
+            f"Error updating round duration for event {event_id}: {str(e)}",
+            exc_info=True,
+        )
         return jsonify({"error": "Failed to update round duration"}), 500
 
 

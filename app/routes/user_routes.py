@@ -383,7 +383,7 @@ def sign_in():
     except ValueError as e:
         return jsonify({"error": str(e)}), 401
     except Exception as e:
-        print(f"Login error: {str(e)}")
+        current_app.logger.error(f"Login error: {str(e)}", exc_info=True)
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
@@ -410,7 +410,9 @@ def validate_token():
 
         return jsonify({"valid": True, "user": current_user.to_dict()})
     except Exception as e:
-        print(f"Token validation error: {str(e)}")
+        current_app.logger.error(
+            f"Token validation error: {str(e)}", exc_info=True
+        )
         return jsonify({"error": "Invalid or expired token"}), 401
 
 
@@ -459,7 +461,6 @@ def user_profile_dashboard():
         if can_view_billing:
             dashboard["billing"] = {
                 "own_summary": build_billing_summary(current_user.id),
-                "stripe_connected_account_id": current_user.stripe_connected_account_id,
                 "stripe_connect_onboarding_complete": bool(
                     current_user.stripe_connect_onboarding_complete
                 ),

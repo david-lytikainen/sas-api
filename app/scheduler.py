@@ -1,6 +1,6 @@
 import atexit
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Callable, Optional
 
@@ -17,6 +17,7 @@ _scheduler_lock = Lock()
 _scheduler: Optional[BackgroundScheduler] = None
 _AUTO_COMPLETE_LOCK_KEY = 90412025
 _REMINDER_LOCK_KEY = 90412026
+_EMPTY_RUN_RETENTION_DAYS = 10
 
 
 def start_embedded_scheduler(app):
@@ -177,5 +178,19 @@ def _record_scheduler_job_run(
             )
         )
         db.session.commit()
+        _purge_old_empty_scheduler_runs()
     except Exception:
         db.session.rollback()
+
+
+def _purge_old_empty_scheduler_runs():
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_EMPTY_RUN_RETENTION_DAYS)
+    (
+        SchedulerJobRun.query.filter(
+            SchedulerJobRun.status == "success",
+            SchedulerJobRun.processed_count == 0,
+            SchedulerJobRun.error_message.is_(None),
+            SchedulerJobRun.created_at < cutoff,
+        ).delete(synchronize_session=False)
+    )
+    db.session.commit()

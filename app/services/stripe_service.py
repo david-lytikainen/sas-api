@@ -257,16 +257,26 @@ class StripeService:
         if not payment.stripe_payment_intent_id:
             raise ValueError("Missing Stripe payment intent for refund.")
 
-        refund = stripe.Refund.create(
-            payment_intent=payment.stripe_payment_intent_id,
-            reason="requested_by_customer",
-            metadata={
+        refund_kwargs = {
+            "payment_intent": payment.stripe_payment_intent_id,
+            "reason": "requested_by_customer",
+            "metadata": {
                 "event_payment_id": str(payment.id),
                 "event_id": str(payment.event_id),
                 "user_id": str(payment.user_id),
                 "failure_reason": reason[:400],
             },
-        )
+        }
+        organizer = User.query.get(payment.organizer_user_id)
+        if (
+            organizer
+            and organizer.role_id != 3
+            and organizer.stripe_connected_account_id
+        ):
+            refund_kwargs["reverse_transfer"] = True
+            refund_kwargs["refund_application_fee"] = True
+
+        refund = stripe.Refund.create(**refund_kwargs)
         payment.stripe_refund_id = refund.id
         payment.refund_status = refund.status
         payment.refunded_amount_cents = int(refund.amount or 0)
