@@ -11,12 +11,14 @@ from sqlalchemy import text
 from app.extensions import db
 from app.models import SchedulerJobRun
 from app.services.event_service import EventService
+from app.utils.email import process_pending_email_jobs
 
 
 _scheduler_lock = Lock()
 _scheduler: Optional[BackgroundScheduler] = None
 _AUTO_COMPLETE_LOCK_KEY = 90412025
 _REMINDER_LOCK_KEY = 90412026
+_EMAIL_JOBS_LOCK_KEY = 90412027
 _EMPTY_RUN_RETENTION_DAYS = 10
 
 
@@ -67,6 +69,17 @@ def start_embedded_scheduler(app):
             max_instances=1,
             misfire_grace_time=60 * 60,
         )
+        scheduler.add_job(
+            _run_pending_email_jobs,
+            "interval",
+            seconds=15,
+            args=[app],
+            id="process-pending-email-jobs",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=30,
+        )
         scheduler.start()
         atexit.register(_shutdown_scheduler)
         _scheduler = scheduler
@@ -105,6 +118,18 @@ def _run_due_event_reminders(app):
         "Embedded scheduler sent %s due event reminder(s).",
         "Embedded scheduler failed during due-event reminders: %s",
         lambda: EventService.send_due_event_reminders(datetime.now(timezone.utc)),
+    )
+
+
+def _run_pending_email_jobs(app):
+    _run_locked_job(
+        app,
+        _EMAIL_JOBS_LOCK_KEY,
+        "Skipped pending email processing because another app process holds the scheduler lock.",
+        "process-pending-email-jobs",
+        "Embedded scheduler processed %s email job(s).",
+        "Embedded scheduler failed during pending email processing: %s",
+        lambda: process_pending_email_jobs(datetime.now(timezone.utc)),
     )
 
 

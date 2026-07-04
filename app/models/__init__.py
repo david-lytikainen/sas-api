@@ -1,5 +1,6 @@
 from app.models.event import Event
 from app.models.event_attendee import EventAttendee
+from app.models.email_job import EmailJob
 from app.models.event_organizer import EventOrganizer
 from app.models.event_speed_date import EventSpeedDate
 from app.models.event_timer import EventTimer
