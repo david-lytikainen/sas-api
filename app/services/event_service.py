@@ -2,22 +2,18 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import math
-from app.extensions import db
-from app.repositories.event_repository import EventRepository
-from app.repositories.user_repository import UserRepository
-from app.repositories.event_attendee_repository import EventAttendeeRepository
-from app.repositories.event_waitlist_repository import EventWaitlistRepository
-from app.exceptions import UnauthorizedError, MissingFieldsError
-from app.models.enums import EventStatus, Gender, RegistrationStatus
-from app.models import Event, EventAttendee
-from app.services.stripe_service import StripeService
-from app.utils.email import (
-    send_event_registration_confirmation_email,
-    send_event_reminder_email,
-    send_waitlist_spot_open_email,
-)
 from typing import List
 from zoneinfo import ZoneInfo
+from app.extensions import db
+from app.exceptions import UnauthorizedError, MissingFieldsError
+from app.models import Event, EventAttendee
+from app.models.enums import EventStatus, Gender, RegistrationStatus
+from app.repositories.event_attendee_repository import EventAttendeeRepository
+from app.repositories.event_repository import EventRepository
+from app.repositories.event_waitlist_repository import EventWaitlistRepository
+from app.repositories.user_repository import UserRepository
+from app.services.stripe_service import StripeService
+from app.utils.email import send_event_registration_confirmation_email, send_event_reminder_email, send_waitlist_spot_open_email
 
 
 class EventService:

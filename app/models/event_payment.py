@@ -19,13 +19,5 @@ class EventPayment(db.Model):
     registration_status = db.Column(db.String(50), nullable=False, default="pending")
     refund_status = db.Column(db.String(50), nullable=True)
     failure_reason = db.Column(db.Text, nullable=True)
-    created_at = db.Column(
-        db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
-    )
-    updated_at = db.Column(
-        db.TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-    )
-
+    created_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())

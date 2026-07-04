@@ -9,7 +9,4 @@ class SchedulerJobRun(db.Model):
     status = db.Column(db.String(20), nullable=False)
     processed_count = db.Column(db.Integer, nullable=False, default=0)
     error_message = db.Column(db.Text, nullable=True)
-    created_at = db.Column(
-        db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now()
-    )
-
+    created_at = db.Column(db.TIMESTAMP(timezone=True), nullable=False, server_default=db.func.now())

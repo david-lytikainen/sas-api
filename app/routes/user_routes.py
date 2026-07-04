@@ -1,18 +1,16 @@
-from flask import Blueprint, request, jsonify, make_response
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import Event, EventPayment, SchedulerJobRun, User
-from app.models.enums import Gender
-from app.models.church import Church
-from app.extensions import db
-from app.utils.email import send_password_reset_email
-from app.utils.churches import resolve_church_id
-from app.services.stripe_service import StripeService
-from app.services.event_service import EventService
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import create_access_token
-from flask import current_app
 from datetime import datetime
+from flask import Blueprint, current_app, jsonify, make_response, request
+from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from sqlalchemy import func, text
+from werkzeug.security import check_password_hash, generate_password_hash
+from app.extensions import db
+from app.models import Event, EventPayment, SchedulerJobRun, User
+from app.models.church import Church
+from app.models.enums import Gender
+from app.services.event_service import EventService
+from app.services.stripe_service import StripeService
+from app.utils.churches import resolve_church_id
+from app.utils.email import send_password_reset_email
 
 user_bp = Blueprint("user", __name__)
 
@@ -21,12 +19,18 @@ def find_user_by_email(email):
     return User.query.filter_by(email=email).first()
 
 
-def serialize_user(user: User):
-    return {"user": user.to_dict()}
-
-
 def cents_to_dollars(total_cents: int | None) -> str:
     return f"{((total_cents or 0) / 100):.2f}"
+
+
+def serialize_scheduler_run(run: SchedulerJobRun):
+    return {
+        "job_name": run.job_name,
+        "status": run.status,
+        "processed_count": run.processed_count,
+        "error_message": run.error_message,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
 
 
 def build_billing_summary(organizer_user_id: int):
@@ -153,24 +157,8 @@ def build_admin_tools_payload():
     )
 
     return {
-        "latest_runs": [
-            {
-                "job_name": run.job_name,
-                "status": run.status,
-                "processed_count": run.processed_count,
-                "error_message": run.error_message,
-                "created_at": run.created_at.isoformat() if run.created_at else None,
-            }
-            for run in latest_status_rows
-        ],
-        "recent_failures": [
-            {
-                "job_name": run.job_name,
-                "error_message": run.error_message,
-                "created_at": run.created_at.isoformat() if run.created_at else None,
-            }
-            for run in recent_failures
-        ],
+        "latest_runs": [serialize_scheduler_run(run) for run in latest_status_rows],
+        "recent_failures": [serialize_scheduler_run(run) for run in recent_failures],
     }
 
 
@@ -208,20 +196,7 @@ def build_health_payload():
         "scheduler": {
             "embedded_enabled": "embedded_scheduler" in current_app.extensions,
             "error": scheduler_error,
-            "latest_auto_complete_run": (
-                {
-                    "status": latest_auto_complete_run.status,
-                    "processed_count": latest_auto_complete_run.processed_count,
-                    "error_message": latest_auto_complete_run.error_message,
-                    "created_at": (
-                        latest_auto_complete_run.created_at.isoformat()
-                        if latest_auto_complete_run.created_at
-                        else None
-                    ),
-                }
-                if latest_auto_complete_run
-                else None
-            ),
+            "latest_auto_complete_run": serialize_scheduler_run(latest_auto_complete_run) if latest_auto_complete_run else None,
         },
     }, health_status
 
@@ -448,7 +423,7 @@ def user_profile():
         current_user = User.query.get_or_404(current_user_id)
 
         if request.method == "GET":
-            return jsonify(serialize_user(current_user)), 200
+            return jsonify({"user": current_user.to_dict()}), 200
 
         data = request.get_json()
         if not data:

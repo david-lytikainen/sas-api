@@ -2,7 +2,7 @@ import atexit
 import os
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Optional
+from typing import Callable, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -84,71 +84,46 @@ def _is_werkzeug_parent_process() -> bool:
 
 
 def _run_due_event_auto_complete(app):
-    with app.app_context():
-        lock_connection = _acquire_job_lock(_AUTO_COMPLETE_LOCK_KEY)
-        if lock_connection is None:
-            app.logger.info(
-                "Skipped due-event auto-complete because another app process holds the scheduler lock."
-            )
-            return
-
-        try:
-            completed_count = EventService.auto_complete_due_events(
-                datetime.now(timezone.utc)
-            )
-            _record_scheduler_job_run(
-                "auto-complete-due-events", "success", completed_count
-            )
-            app.logger.info(
-                "Embedded scheduler auto-completed %s due event(s).",
-                completed_count,
-            )
-        except Exception as exc:
-            _record_scheduler_job_run(
-                "auto-complete-due-events", "failed", 0, str(exc)
-            )
-            app.logger.error(
-                "Embedded scheduler failed during due-event auto-complete: %s",
-                str(exc),
-                exc_info=True,
-            )
-            raise
-        finally:
-            _release_job_lock(lock_connection, _AUTO_COMPLETE_LOCK_KEY)
+    _run_locked_job(
+        app,
+        _AUTO_COMPLETE_LOCK_KEY,
+        "Skipped due-event auto-complete because another app process holds the scheduler lock.",
+        "auto-complete-due-events",
+        "Embedded scheduler auto-completed %s due event(s).",
+        "Embedded scheduler failed during due-event auto-complete: %s",
+        lambda: EventService.auto_complete_due_events(datetime.now(timezone.utc)),
+    )
 
 
 def _run_due_event_reminders(app):
+    _run_locked_job(
+        app,
+        _REMINDER_LOCK_KEY,
+        "Skipped due-event reminders because another app process holds the scheduler lock.",
+        "send-due-event-reminders",
+        "Embedded scheduler sent %s due event reminder(s).",
+        "Embedded scheduler failed during due-event reminders: %s",
+        lambda: EventService.send_due_event_reminders(datetime.now(timezone.utc)),
+    )
+
+
+def _run_locked_job(app, lock_key: int, skip_message: str, job_name: str, success_log: str, failure_log: str, runner: Callable[[], int]):
     with app.app_context():
-        lock_connection = _acquire_job_lock(_REMINDER_LOCK_KEY)
+        lock_connection = _acquire_job_lock(lock_key)
         if lock_connection is None:
-            app.logger.info(
-                "Skipped due-event reminders because another app process holds the scheduler lock."
-            )
+            app.logger.info(skip_message)
             return
 
         try:
-            reminder_count = EventService.send_due_event_reminders(
-                datetime.now(timezone.utc)
-            )
-            _record_scheduler_job_run(
-                "send-due-event-reminders", "success", reminder_count
-            )
-            app.logger.info(
-                "Embedded scheduler sent %s due event reminder(s).",
-                reminder_count,
-            )
+            processed_count = runner()
+            _record_scheduler_job_run(job_name, "success", processed_count)
+            app.logger.info(success_log, processed_count)
         except Exception as exc:
-            _record_scheduler_job_run(
-                "send-due-event-reminders", "failed", 0, str(exc)
-            )
-            app.logger.error(
-                "Embedded scheduler failed during due-event reminders: %s",
-                str(exc),
-                exc_info=True,
-            )
+            _record_scheduler_job_run(job_name, "failed", 0, str(exc))
+            app.logger.error(failure_log, str(exc), exc_info=True)
             raise
         finally:
-            _release_job_lock(lock_connection, _REMINDER_LOCK_KEY)
+            _release_job_lock(lock_connection, lock_key)
 
 
 def _acquire_job_lock(lock_key: int):
