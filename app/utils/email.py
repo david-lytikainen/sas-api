@@ -15,6 +15,7 @@ EMAIL_JOB_STATUS_SENT = "sent"
 EMAIL_JOB_STATUS_FAILED = "failed"
 EMAIL_JOB_MAX_ATTEMPTS = 3
 EMAIL_JOB_RETRY_DELAY = timedelta(minutes=5)
+EMAIL_JOB_SENT_RETENTION_DAYS = 30
 
 
 def enqueue_email_job(job_type: str, payload: dict, scheduled_for: datetime | None = None):
@@ -69,7 +70,20 @@ def process_pending_email_jobs(now_utc: datetime | None = None, limit: int = 25)
                 f"Failed to process email job {job.id}: {str(exc)}", exc_info=True
             )
 
+    _purge_old_sent_email_jobs(comparison_time)
     return processed_count
+
+
+def _purge_old_sent_email_jobs(now_utc: datetime):
+    cutoff = now_utc - timedelta(days=EMAIL_JOB_SENT_RETENTION_DAYS)
+    (
+        EmailJob.query.filter(
+            EmailJob.status == EMAIL_JOB_STATUS_SENT,
+            EmailJob.sent_at.isnot(None),
+            EmailJob.sent_at < cutoff,
+        ).delete(synchronize_session=False)
+    )
+    db.session.commit()
 
 
 def send_password_reset_email(user):
