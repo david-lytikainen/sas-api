@@ -2,7 +2,7 @@
 import os
 from importlib import import_module
 from dotenv import load_dotenv
-from app import create_app, db
+from app import create_app
 from app.scheduler import start_embedded_scheduler
 
 # Load environment variables
@@ -12,16 +12,6 @@ load_dotenv()
 app = create_app()
 start_embedded_scheduler(app)
 import_module("app.models.event_waitlist")
-
-# Create database tables if they don't exist
-with app.app_context():
-    app.logger.info("Attempting to create database tables...")
-    # Log known tables by SQLAlchemy metadata
-    app.logger.info(
-        f"Tables known to SQLAlchemy metadata before create_all: {list(db.metadata.tables.keys())}"
-    )
-    db.create_all()
-    app.logger.info("Database tables check/creation complete.")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
