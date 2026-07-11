@@ -2,7 +2,6 @@ from app.extensions import db
 from app.models.event_waitlist import EventWaitlist
 from app.models.user import User  # For type hinting or joining if needed
 from typing import List, Optional
-from app.models.enums import Gender
 
 
 class EventWaitlistRepository:
@@ -44,22 +43,3 @@ class EventWaitlistRepository:
             db.session.commit()
             return True
         return False
-
-    @staticmethod
-    def get_first_in_waitlist(event_id: int) -> Optional[EventWaitlist]:
-        """Gets the first user in the waitlist for an event (oldest entry)."""
-        return (
-            EventWaitlist.query.filter_by(event_id=event_id)
-            .order_by(EventWaitlist.waitlisted_at.asc())
-            .first()
-        )
-
-    @staticmethod
-    def get_first_in_waitlist_by_gender(event_id: int, gender: Gender):
-        return (
-            db.session.query(EventWaitlist)
-            .join(User, EventWaitlist.user_id == User.id)
-            .filter(EventWaitlist.event_id == event_id, User.gender == gender)
-            .order_by(EventWaitlist.waitlisted_at.asc())
-            .first()
-        )

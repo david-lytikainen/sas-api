@@ -16,7 +16,6 @@ from app.models.event_timer import EventTimer
 from datetime import datetime, timedelta
 from random import randrange
 from werkzeug.security import generate_password_hash
-from create_admin import create_admin_user
 from app.models.church import Church
 from app.services.event_service import EventService
 
@@ -311,7 +310,6 @@ def main():
         test_event = create_test_event(test_users[0].id)
         create_test_attendees(test_users, test_event)
         # have_attendees_match(test_event)
-        create_admin_user(update=True)
 
 
 if __name__ == "__main__":

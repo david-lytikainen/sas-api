@@ -16,6 +16,12 @@ class Event(db.Model):
         db.String(20),
         nullable=False,
     )
+    enforce_gender_balance = db.Column(
+        db.Boolean,
+        nullable=False,
+        server_default=db.true(),
+        default=True,
+    )
     price_per_person = db.Column(db.DECIMAL(10, 2), nullable=False)
     registration_deadline = db.Column(db.TIMESTAMP(timezone=True), nullable=False)
     num_rounds = db.Column(db.Integer, nullable=True)
@@ -51,6 +57,7 @@ class Event(db.Model):
             "address": self.address,
             "max_capacity": self.max_capacity,
             "status": self.status,
+            "enforce_gender_balance": self.enforce_gender_balance,
             "price_per_person": (
                 str(self.price_per_person) if self.price_per_person else None
             ),

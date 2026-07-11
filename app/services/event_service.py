@@ -1,19 +1,45 @@
-from datetime import datetime, timezone
+from calendar import monthrange
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import math
-import random
-from app.repositories.event_repository import EventRepository
-from app.repositories.user_repository import UserRepository
-from app.repositories.event_attendee_repository import EventAttendeeRepository
-from app.repositories.event_waitlist_repository import EventWaitlistRepository
-from app.exceptions import UnauthorizedError, MissingFieldsError
-from app.models.enums import EventStatus, Gender, RegistrationStatus
-from app.models import Event
-from app.services.stripe_service import StripeService
 from typing import List
+from zoneinfo import ZoneInfo
+from app.extensions import db
+from app.exceptions import UnauthorizedError, MissingFieldsError
+from app.models import Event, EventAttendee
+from app.models.enums import EventStatus, Gender, RegistrationStatus
+from app.repositories.event_attendee_repository import EventAttendeeRepository
+from app.repositories.event_repository import EventRepository
+from app.repositories.event_waitlist_repository import EventWaitlistRepository
+from app.repositories.user_repository import UserRepository
+from app.services.stripe_service import StripeService
+from app.utils.email import send_event_registration_confirmation_email, send_event_reminder_email, send_waitlist_spot_open_email
 
 
 class EventService:
+    AUTO_COMPLETE_TIMEZONE = ZoneInfo("America/New_York")
+
+    @staticmethod
+    def auto_complete_due_events(now_utc: datetime | None = None) -> int:
+        comparison_time = now_utc or datetime.now(timezone.utc)
+        comparison_time_est = comparison_time.astimezone(EventService.AUTO_COMPLETE_TIMEZONE)
+        due_events = Event.query.filter_by(status=EventStatus.IN_PROGRESS.value).all()
+        updated_count = 0
+
+        for event in due_events:
+            if (
+                event.starts_at
+                and event.starts_at.astimezone(EventService.AUTO_COMPLETE_TIMEZONE).date()
+                < comparison_time_est.date()
+            ):
+                event.status = EventStatus.COMPLETED.value
+                updated_count += 1
+
+        if updated_count:
+            db.session.commit()
+
+        return updated_count
+
     @staticmethod
     def get_events() -> List[Event]:
         return EventRepository.get_events()
@@ -63,6 +89,9 @@ class EventService:
                 "address": data["address"],
                 "max_capacity": data["max_capacity"],
                 "status": EventStatus.REGISTRATION_OPEN.value,
+                "enforce_gender_balance": bool(
+                    data.get("enforce_gender_balance", True)
+                ),
                 "price_per_person": Decimal(str(data["price_per_person"])),
                 "registration_deadline": datetime.fromisoformat(
                     data["starts_at"].replace("Z", "+00:00")
@@ -100,23 +129,29 @@ class EventService:
         if not user:
             return None, {"error": f"User with ID {user_id} not found"}
 
-        same_gender_count = (
-            EventAttendeeRepository.count_by_event_and_status_and_gender(
-                event_id,
-                [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                user.gender,
+        if event.enforce_gender_balance:
+            same_gender_count = (
+                EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    user.gender,
+                )
             )
-        )
-        if same_gender_count >= math.floor(event.max_capacity * 0.6):
-            return None, {
-                "error": "Event is currently full for this gender",
-                "waitlist_available": True,
-            }
+            if same_gender_count >= math.floor(event.max_capacity * 0.6):
+                return None, {
+                    "error": "Event is currently full for this gender",
+                    "waitlist_available": True,
+                }
 
         return event, None
 
     @staticmethod
-    def register_for_event(event_id: int, user_id: int, join_waitlist: bool = False):
+    def register_for_event(
+        event_id: int,
+        user_id: int,
+        join_waitlist: bool = False,
+        payment_confirmed: bool = False,
+    ):
         event, validation_error = EventService.validate_registration_for_event(
             event_id, user_id
         )
@@ -125,17 +160,27 @@ class EventService:
                 return EventService.join_event_waitlist(event_id, user_id)
             return validation_error
 
-        # Generate random 4-digit PIN
-        pin = "".join(random.choices("0123456789", k=4))
+        if (
+            not join_waitlist
+            and event.price_per_person
+            and Decimal(str(event.price_per_person)) > 0
+            and not payment_confirmed
+        ):
+            return {
+                "error": "Payment is required before registration. Please use Stripe Checkout to sign up for this event."
+            }
 
-        EventAttendeeRepository.register_for_event(
+        registration = EventAttendeeRepository.register_for_event(
             {
                 "event_id": event_id,
                 "user_id": user_id,
                 "status": RegistrationStatus.REGISTERED,
-                "pin": pin,
             }
         )
+        attendee = UserRepository.find_by_id(registration.user_id)
+        organizer = UserRepository.find_by_id(event.creator_id)
+        if attendee and organizer:
+            send_event_registration_confirmation_email(attendee, event, organizer)
 
         return {"message": "Successfully registered for event"}
 
@@ -191,74 +236,119 @@ class EventService:
 
         EventAttendeeRepository.delete(event_id, user_id)
 
-        # Attempt to register the first person from the waitlist if a spot opened up
+        # Notify waitlisted users if a spot opened up so they can sign themselves up.
         EventService.process_waitlist_for_event(event_id)
 
         return {"message": "Successfully cancelled registration"}
 
     @staticmethod
+    def send_due_event_reminders(now_utc: datetime | None = None) -> int:
+        comparison_time = now_utc or datetime.now(timezone.utc)
+        comparison_time_est = comparison_time.astimezone(
+            EventService.AUTO_COMPLETE_TIMEZONE
+        )
+        comparison_date_est = comparison_time_est.date()
+
+        registrations = (
+            db.session.query(EventAttendee, Event)
+            .join(Event, EventAttendee.event_id == Event.id)
+            .filter(
+                EventAttendee.status.in_(
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                ),
+                Event.status == EventStatus.REGISTRATION_OPEN.value,
+                Event.starts_at > comparison_time,
+            )
+            .all()
+        )
+
+        sent_count = 0
+        for registration, event in registrations:
+            reminder_label = EventService.get_due_reminder_label(
+                event.starts_at.astimezone(EventService.AUTO_COMPLETE_TIMEZONE).date(),
+                comparison_date_est,
+            )
+            if not reminder_label:
+                continue
+
+            attendee = UserRepository.find_by_id(registration.user_id)
+            organizer = UserRepository.find_by_id(event.creator_id)
+            if not attendee or not organizer:
+                continue
+
+            send_event_reminder_email(attendee, event, organizer, reminder_label)
+            sent_count += 1
+
+        return sent_count
+
+    @staticmethod
+    def get_due_reminder_label(event_date: date, comparison_date: date) -> str | None:
+        if event_date == comparison_date + timedelta(days=1):
+            return "1 day"
+        if event_date == comparison_date + timedelta(days=7):
+            return "1 week"
+        if event_date == EventService.add_months(comparison_date, 1):
+            return "1 month"
+        return None
+
+    @staticmethod
+    def add_months(value: date, months: int) -> date:
+        month_index = value.month - 1 + months
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(value.day, monthrange(year, month)[1])
+        return date(year, month, day)
+
+    @staticmethod
     def process_waitlist_for_event(event_id: int):
-        """Checks if a spot has opened up and registers the first person from the waitlist."""
+        """Checks if a spot has opened up and notifies eligible waitlisted users."""
         event = EventRepository.get_event(event_id)
         if not event or event.status != EventStatus.REGISTRATION_OPEN.value:
-            return  # Only process for open events
+            return
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
+        if attendee_count >= event.max_capacity:
+            return
 
-        if attendee_count < event.max_capacity:
-            first_waitlisted = EventWaitlistRepository.get_first_in_waitlist(event_id)
-            if first_waitlisted:
-                first_waitlisted_user = UserRepository.find_by_id(
-                    first_waitlisted.user_id
+        if event.enforce_gender_balance:
+            gender_cap = math.floor(event.max_capacity * 0.6)
+            eligible_genders = {
+                Gender.MALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    Gender.MALE,
                 )
-                if not first_waitlisted_user:
-                    return {
-                        "error": f"User with ID {first_waitlisted.user_id} not found"
-                    }
-                same_gender_count = (
-                    EventAttendeeRepository.count_by_event_and_status_and_gender(
-                        event_id,
-                        [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
-                        first_waitlisted_user.gender,
-                    )
+                < gender_cap,
+                Gender.FEMALE: EventAttendeeRepository.count_by_event_and_status_and_gender(
+                    event_id,
+                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN],
+                    Gender.FEMALE,
                 )
+                < gender_cap,
+            }
+        else:
+            eligible_genders = {
+                Gender.MALE: True,
+                Gender.FEMALE: True,
+            }
 
-                # get the first waitlisted opposite gender if we have hit capacity
-                if same_gender_count >= math.floor(event.max_capacity * 0.6):
-                    other_gender = (
-                        Gender.MALE
-                        if first_waitlisted_user.gender == Gender.FEMALE
-                        else Gender.FEMALE
-                    )
-                    first_waitlisted = (
-                        EventWaitlistRepository.get_first_in_waitlist_by_gender(
-                            event_id, other_gender
-                        )
-                    )
-
-                # Attempt to register this user
-                pin = "".join(random.choices("0123456789", k=4))
-                try:
-                    EventAttendeeRepository.register_for_event(
-                        {
-                            "event_id": event_id,
-                            "user_id": first_waitlisted.user_id,
-                            "status": RegistrationStatus.REGISTERED,
-                            "pin": pin,
-                        }
-                    )
-                    EventWaitlistRepository.remove_from_waitlist(
-                        event_id, first_waitlisted.user_id
-                    )
-                    # Optionally: Send a notification to the user they have been registered.
-                    # current_app.logger.info(f"User {first_waitlisted.user_id} registered from waitlist for event {event_id}")
-                except Exception:
-                    # current_app.logger.error(f"Error registering user {first_waitlisted.user_id} from waitlist for event {event_id}: {str(e)}")
-                    pass  # Keep them on waitlist if registration fails for some reason
+        waitlist_entries = EventWaitlistRepository.get_waitlist_for_event(event_id)
+        for entry in waitlist_entries:
+            waitlisted_user = UserRepository.find_by_id(entry.user_id)
+            if not waitlisted_user or not eligible_genders.get(waitlisted_user.gender, False):
+                continue
+            try:
+                send_waitlist_spot_open_email(waitlisted_user, event)
+            except Exception:
+                pass
 
     @staticmethod
     def check_in(event_id: int, user_id: int, pin: str):
+        return {"error": "Self check-in has been removed. Ask event staff to check you in."}, 410
+
+    @staticmethod
+    def manual_check_in(event_id: int, user_id: int):
         event = EventRepository.get_event(event_id)
         if not event:
             return {"error": f"Event with ID {event_id} not found"}, 404
@@ -287,14 +377,11 @@ class EventService:
                 "error": f"Cannot check in. Your registration status is: {registration.status.name if registration.status else 'Unknown'}"
             }, 400
 
-        if registration.pin != pin:
-            return {"error": "Invalid PIN"}, 401  # Unauthorized or 400 Bad Request
-
         updated_registration = EventAttendeeRepository.update_registration_status(
             registration, RegistrationStatus.CHECKED_IN, datetime.now(timezone.utc)
         )
         if updated_registration:
-            return {"message": "Successfully checked in"}, 200
+            return {"message": "Successfully checked in attendee"}, 200
         else:
             # This case should ideally not be hit if update is robust
             return {"error": "Failed to update registration status for check-in"}, 500
@@ -333,6 +420,7 @@ class EventService:
             "price_per_person",
             "status",
             "registration_deadline",
+            "enforce_gender_balance",
         ]
         update_data = {}
 
@@ -411,12 +499,9 @@ class EventService:
         ):
             raise UnauthorizedError("You are not authorized to delete this event.")
 
-        if (
-            event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]
-            and user.role_id != 3
-        ):
+        if event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]:
             return {
-                "error": f"Event is {event.status} and cannot be deleted by an organizer."
+                "error": f"Event is {event.status} and cannot be deleted."
             }, 400
 
         try:
