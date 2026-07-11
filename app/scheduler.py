@@ -20,6 +20,7 @@ _AUTO_COMPLETE_LOCK_KEY = 90412025
 _REMINDER_LOCK_KEY = 90412026
 _EMAIL_JOBS_LOCK_KEY = 90412027
 _EMPTY_RUN_RETENTION_DAYS = 10
+_EMAIL_JOB_INTERVAL_SECONDS = 15 * 60
 
 
 def start_embedded_scheduler(app):
@@ -72,13 +73,13 @@ def start_embedded_scheduler(app):
         scheduler.add_job(
             _run_pending_email_jobs,
             "interval",
-            seconds=15,
+            seconds=_EMAIL_JOB_INTERVAL_SECONDS,
             args=[app],
             id="process-pending-email-jobs",
             replace_existing=True,
             coalesce=True,
             max_instances=1,
-            misfire_grace_time=30,
+            misfire_grace_time=_EMAIL_JOB_INTERVAL_SECONDS,
         )
         scheduler.start()
         atexit.register(_shutdown_scheduler)

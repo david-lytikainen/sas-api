@@ -176,10 +176,22 @@ def build_health_payload():
         health_status = 503
 
     latest_auto_complete_run = None
+    latest_reminder_run = None
+    latest_email_job_run = None
     if database_ok:
         try:
             latest_auto_complete_run = (
                 SchedulerJobRun.query.filter_by(job_name="auto-complete-due-events")
+                .order_by(SchedulerJobRun.created_at.desc())
+                .first()
+            )
+            latest_reminder_run = (
+                SchedulerJobRun.query.filter_by(job_name="send-due-event-reminders")
+                .order_by(SchedulerJobRun.created_at.desc())
+                .first()
+            )
+            latest_email_job_run = (
+                SchedulerJobRun.query.filter_by(job_name="process-pending-email-jobs")
                 .order_by(SchedulerJobRun.created_at.desc())
                 .first()
             )
@@ -197,6 +209,8 @@ def build_health_payload():
             "embedded_enabled": "embedded_scheduler" in current_app.extensions,
             "error": scheduler_error,
             "latest_auto_complete_run": serialize_scheduler_run(latest_auto_complete_run) if latest_auto_complete_run else None,
+            "latest_reminder_run": serialize_scheduler_run(latest_reminder_run) if latest_reminder_run else None,
+            "latest_email_job_run": serialize_scheduler_run(latest_email_job_run) if latest_email_job_run else None,
         },
     }, health_status
 

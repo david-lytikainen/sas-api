@@ -16,8 +16,6 @@ from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
 from app.utils.churches import resolve_church_id
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import or_
-
 event_bp = Blueprint("event", __name__)
 
 def get_event_timer(event_id):
@@ -1269,95 +1267,6 @@ def submit_speed_date_selections(event_id):
             exc_info=True,
         )
         return jsonify({"error": "Failed to submit speed date selections."}), 500
-
-
-@event_bp.route("/events/<int:event_id>/my-matches", methods=["GET"])
-@jwt_required()
-def get_my_matches(event_id):
-    current_user_id = get_jwt_identity()
-    user = User.query.get(current_user_id)
-
-    if not user:
-        return jsonify({"error": "User not found or token invalid"}), 401
-
-    event = Event.query.get(event_id)
-    if not event:
-        return jsonify({"error": "Event not found"}), 404
-
-    if event.status != EventStatus.COMPLETED.value:
-        return (
-            jsonify(
-                {"error": "Matches are only available after the event is completed."}
-            ),
-            400,
-        )
-
-    attendee_record = EventAttendee.query.filter(
-        EventAttendee.event_id == event_id,
-        EventAttendee.user_id == current_user_id,
-        EventAttendee.status == RegistrationStatus.CHECKED_IN,
-    ).first()
-
-    if not attendee_record:
-        return (
-            jsonify({"error": "You were not checked in for this event."}),
-            403,
-        )  # Changed error msg slightly
-
-    mutual_matches_query = EventSpeedDate.query.filter(
-        EventSpeedDate.event_id == event_id,
-        EventSpeedDate.male_interested == True,
-        EventSpeedDate.female_interested == True,
-        or_(
-            EventSpeedDate.male_id == current_user_id,
-            EventSpeedDate.female_id == current_user_id,
-        ),
-    ).all()
-
-    matches_details = []
-    if mutual_matches_query:
-        matched_partner_ids = set()
-        for record in mutual_matches_query:
-            partner_id = (
-                record.female_id
-                if record.male_id == current_user_id
-                else record.male_id
-            )
-            matched_partner_ids.add(partner_id)
-
-        if matched_partner_ids:
-            matched_users = User.query.filter(User.id.in_(matched_partner_ids)).all()
-            for matched_user in matched_users:
-                matches_details.append(
-                    {
-                        "id": matched_user.id,
-                        "first_name": matched_user.first_name,
-                        "last_name": matched_user.last_name,
-                        "email": matched_user.email,
-                        "age": matched_user.calculate_age(),
-                        "gender": (
-                            matched_user.gender.value if matched_user.gender else None
-                        ),
-                    }
-                )
-
-    return jsonify({"matches": matches_details}), 200
-
-
-@event_bp.route("/events/<int:event_id>/all-matches", methods=["GET", "OPTIONS"])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def get_all_matches_for_event(event_id):
-    if request.method == "OPTIONS":
-        return "", 204
-    return (
-        jsonify(
-            {
-                "error": "Event organizers and admins do not have match visibility in the current product flow."
-            }
-        ),
-        403,
-    )
 
 
 @event_bp.route("/events/<int:event_id>", methods=["DELETE", "OPTIONS"])
