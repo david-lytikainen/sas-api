@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 import stripe
 from flask import current_app
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from app.extensions import db
 from app.models import Event, EventPayment, User
 
@@ -203,11 +204,22 @@ class StripeService:
                     "message": "Non-refundable through app. Contact event organizer for refund questions."
                 }
             },
-            success_url=current_app.config.get("STRIPE_CHECKOUT_SUCCESS_URL").replace(
-                "view=create&", ""
+            success_url=StripeService.append_query_params(
+                current_app.config.get("STRIPE_CHECKOUT_SUCCESS_URL").replace(
+                    "view=create&", ""
+                ),
+                {
+                    "checkout": "success",
+                    "session_id": "{CHECKOUT_SESSION_ID}",
+                },
             ),
-            cancel_url=current_app.config.get("STRIPE_CHECKOUT_CANCEL_URL").replace(
-                "view=create&", ""
+            cancel_url=StripeService.append_query_params(
+                current_app.config.get("STRIPE_CHECKOUT_CANCEL_URL").replace(
+                    "view=create&", ""
+                ),
+                {
+                    "checkout": "cancel",
+                },
             ),
             metadata={
                 "checkout_type": "event_registration",
@@ -217,6 +229,15 @@ class StripeService:
             },
         )
         return session.url
+
+    @staticmethod
+    def append_query_params(url: str, params: dict[str, str]) -> str:
+        parsed_url = urlparse(url)
+        query_items = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+        query_items.update({key: value for key, value in params.items() if value is not None})
+        return urlunparse(
+            parsed_url._replace(query=urlencode(query_items))
+        )
 
     @staticmethod
     def upsert_checkout_session_payment(session_data: dict) -> EventPayment | None:
@@ -250,6 +271,113 @@ class StripeService:
         db.session.add(payment)
         db.session.commit()
         return payment
+
+    @staticmethod
+    def retrieve_checkout_session(session_id: str) -> dict:
+        StripeService.require_configured()
+        return stripe.checkout.Session.retrieve(session_id)
+
+    @staticmethod
+    def finalize_event_registration_checkout(session_data: dict) -> dict:
+        metadata = session_data.get("metadata") or {}
+        if metadata.get("checkout_type") != "event_registration":
+            return {"error": "Checkout session is not an event registration session."}
+
+        session_id = session_data.get("id")
+        event_id = metadata.get("event_id")
+        user_id = metadata.get("user_id")
+        if not all([session_id, event_id, user_id]):
+            return {"error": "Checkout session is missing required registration metadata."}
+
+        if (session_data.get("payment_status") or "").lower() != "paid":
+            return {"error": "Checkout session has not been paid."}
+
+        payment = StripeService.upsert_checkout_session_payment(session_data)
+        if payment and payment.registration_status in {
+            "registered",
+            "registration_failed_refunded",
+            "refund_failed",
+        }:
+            return {
+                "message": "Checkout session already processed.",
+                "status": payment.registration_status,
+            }
+
+        user = User.query.get(int(user_id))
+        if user and session_data.get("customer"):
+            user.stripe_customer_id = session_data.get("customer")
+            db.session.commit()
+
+        from app.services.event_service import EventService
+
+        registration_response = EventService.register_for_event(
+            int(event_id),
+            int(user_id),
+            join_waitlist=False,
+            payment_confirmed=True,
+        )
+
+        if isinstance(registration_response, dict) and "error" in registration_response:
+            failure_reason = registration_response["error"]
+            if failure_reason == "You are already registered for this event" and payment:
+                payment.registration_status = "registered"
+                payment.failure_reason = None
+                db.session.add(payment)
+                db.session.commit()
+                return {
+                    "message": "Already registered for event.",
+                    "status": "registered",
+                }
+
+            if payment:
+                payment.registration_status = "registration_failed"
+                payment.failure_reason = failure_reason
+                db.session.add(payment)
+                db.session.commit()
+                try:
+                    payment = StripeService.refund_payment(payment, failure_reason)
+                    payment.registration_status = "registration_failed_refunded"
+                    db.session.add(payment)
+                    db.session.commit()
+                except Exception as refund_error:
+                    db.session.rollback()
+                    current_app.logger.error(
+                        "Automatic refund failed for checkout session %s: %s",
+                        session_id,
+                        str(refund_error),
+                        exc_info=True,
+                    )
+                    payment = EventPayment.query.filter_by(
+                        stripe_checkout_session_id=session_id
+                    ).first()
+                    if payment:
+                        payment.refund_status = "failed"
+                        payment.registration_status = "refund_failed"
+                        payment.failure_reason = (
+                            f"{failure_reason} | Refund error: {str(refund_error)}"
+                        )
+                        db.session.add(payment)
+                        db.session.commit()
+            current_app.logger.warning(
+                "Paid checkout completed but registration failed for user %s event %s: %s",
+                user_id,
+                event_id,
+                failure_reason,
+            )
+            return {"error": failure_reason}
+
+        if payment:
+            payment.registration_status = "registered"
+            payment.failure_reason = None
+            db.session.add(payment)
+            db.session.commit()
+
+        return {
+            "message": registration_response.get(
+                "message", "Successfully registered for event"
+            ),
+            "status": "registered",
+        }
 
     @staticmethod
     def refund_payment(payment: EventPayment, reason: str) -> EventPayment:

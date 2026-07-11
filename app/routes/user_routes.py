@@ -602,63 +602,7 @@ def stripe_webhook():
             checkout_type = metadata.get("checkout_type")
 
             if checkout_type == "event_registration":
-                user_id = metadata.get("user_id")
-                event_id = metadata.get("event_id")
-                payment = StripeService.upsert_checkout_session_payment(data_object)
-                if payment and payment.registration_status in {
-                    "registered",
-                    "registration_failed_refunded",
-                    "refund_failed",
-                }:
-                    return jsonify({"received": True}), 200
-                user = User.query.get(int(user_id)) if user_id else None
-                if user:
-                    user.stripe_customer_id = data_object.get("customer")
-                    db.session.commit()
-
-                if event_id and user_id:
-                    registration_response = EventService.register_for_event(
-                        int(event_id),
-                        int(user_id),
-                        join_waitlist=False,
-                        payment_confirmed=True,
-                    )
-                    if isinstance(registration_response, dict) and "error" in registration_response:
-                        failure_reason = registration_response["error"]
-                        if payment:
-                            payment.registration_status = "registration_failed"
-                            payment.failure_reason = failure_reason
-                            db.session.add(payment)
-                            db.session.commit()
-                        if payment:
-                            try:
-                                payment = StripeService.refund_payment(payment, failure_reason)
-                                payment.registration_status = "registration_failed_refunded"
-                                db.session.add(payment)
-                                db.session.commit()
-                            except Exception as refund_error:
-                                db.session.rollback()
-                                current_app.logger.error(
-                                    "Automatic refund failed for checkout session %s: %s",
-                                    data_object.get("id"),
-                                    str(refund_error),
-                                    exc_info=True,
-                                )
-                                if payment:
-                                    payment.refund_status = "failed"
-                                    payment.registration_status = "refund_failed"
-                                    payment.failure_reason = (
-                                        f"{failure_reason} | Refund error: {str(refund_error)}"
-                                    )
-                                    db.session.add(payment)
-                                    db.session.commit()
-                        current_app.logger.warning(
-                            f"Paid checkout completed but registration failed for user {user_id} event {event_id}: {registration_response['error']}"
-                        )
-                    elif payment:
-                        payment.registration_status = "registered"
-                        db.session.add(payment)
-                        db.session.commit()
+                StripeService.finalize_event_registration_checkout(data_object)
 
         elif event_type == "account.updated":
             metadata = data_object.get("metadata") or {}

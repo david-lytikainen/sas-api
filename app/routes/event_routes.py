@@ -366,6 +366,42 @@ def create_event_registration_checkout(event_id):
         return jsonify({"error": "Failed to create checkout session"}), 500
 
 
+@event_bp.route("/events/checkout/complete", methods=["POST"])
+@jwt_required()
+def complete_event_registration_checkout():
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+
+    if not session_id or not isinstance(session_id, str):
+        return jsonify({"error": "A valid session_id is required."}), 400
+
+    try:
+        session_data = StripeService.retrieve_checkout_session(session_id)
+        metadata = session_data.get("metadata") or {}
+        if metadata.get("checkout_type") != "event_registration":
+            return jsonify({"error": "Checkout session is not an event registration session."}), 400
+
+        if metadata.get("user_id") != str(current_user_id):
+            return jsonify({"error": "You are not authorized to complete this checkout session."}), 403
+
+        result = StripeService.finalize_event_registration_checkout(session_data)
+        if "error" in result:
+            return jsonify(result), 400
+
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            "Error completing event checkout session %s: %s",
+            session_id,
+            str(e),
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to complete checkout session"}), 500
+
+
 @event_bp.route(
     "/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"]
 )
