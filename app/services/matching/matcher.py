@@ -46,8 +46,7 @@ class SpeedDateMatcher:
 
             compatible_dates = [
                 potential_date for potential_date in all_opposite_gender
-                if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
-                    and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 3)
+                if (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 3)
                     and potential_date.id not in previous_date_user_ids
             ]
             current_app.logger.info(f"\nInitial len of compatible dates (age diff <= 3): {len(compatible_dates)}")
@@ -62,8 +61,7 @@ class SpeedDateMatcher:
                 current_app.logger.info("\nNot enough matches, trying extended age range (<= 4)")
                 compatible_dates = [
                     potential_date for potential_date in all_opposite_gender
-                    if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
-                        and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 4)
+                    if (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 4)
                         and potential_date.id not in previous_date_user_ids
                 ]
                 current_app.logger.info(f"New number of compatible dates with age <= 4: {len(compatible_dates)}")
@@ -72,20 +70,10 @@ class SpeedDateMatcher:
                 current_app.logger.info("\nStill not enough matches, trying maximum age range (<= 5)")
                 compatible_dates = [
                     potential_date for potential_date in all_opposite_gender
-                    if (attendee.church_id is None or potential_date.church_id is None or attendee.church_id != potential_date.church_id)
-                        and (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 5)
-                        and potential_date.id not in previous_date_user_ids
-                ]
-                current_app.logger.info(f"New number of compatible dates with age <= 5: {len(compatible_dates)}")
-
-            if len(compatible_dates) < min_dates_needed:
-                current_app.logger.info("\nStill not enough matches, finding matches at same church")
-                compatible_dates = [
-                    potential_date for potential_date in all_opposite_gender
                     if (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 5)
                         and potential_date.id not in previous_date_user_ids
                 ]
-                current_app.logger.info(f"Current compatible dates: {len(compatible_dates)}")
+                current_app.logger.info(f"New number of compatible dates with age <= 5: {len(compatible_dates)}")
 
             all_compatible_dates[attendee.id] = compatible_dates
             current_app.logger.info(

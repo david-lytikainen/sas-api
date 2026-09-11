@@ -5,11 +5,9 @@ from sqlalchemy import func, text
 from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 from app.models import Event, EventPayment, SchedulerJobRun, User
-from app.models.church import Church
 from app.models.enums import Gender
 from app.services.event_service import EventService
 from app.services.stripe_service import StripeService
-from app.utils.churches import resolve_church_id
 from app.utils.email import send_password_reset_email
 
 user_bp = Blueprint("user", __name__)
@@ -226,8 +224,6 @@ def sign_up_user(user_data):
     except KeyError:
         raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
 
-    church_id = resolve_church_id(user_data.get("current_church"))
-
     user = User(
         role_id=1,
         email=user_data["email"],
@@ -237,8 +233,6 @@ def sign_up_user(user_data):
         phone=user_data["phone"],
         gender=gender,
         birthday=datetime.strptime(user_data["birthday"], "%Y-%m-%d").date(),
-        church_id=church_id,
-        denomination_id=user_data.get("denomination_id"),
     )
 
     db.session.add(user)
@@ -324,10 +318,6 @@ def update_profile(user: User, data):
         except ValueError:
             raise ValueError("Invalid birthday format. Use YYYY-MM-DD")
         updated_fields.append("birthday")
-
-    if "current_church" in data:
-        user.church_id = resolve_church_id(data["current_church"])
-        updated_fields.append("current_church")
 
     db.session.commit()
     return {"message": "Profile updated successfully", "updated_fields": updated_fields, "user": user.to_dict()}
@@ -525,14 +515,6 @@ def reset_password(token):
     except Exception:
         return jsonify({"error": "An unexpected error occurred"}), 500
 
-
-@user_bp.route("/churches", methods=["GET"])
-def get_churches():
-    try:
-        churches = Church.query.order_by(Church.name.asc()).all()
-        return jsonify([church.name for church in churches]), 200
-    except Exception:
-        return jsonify({"error": "Failed to fetch churches"}), 500
 
 @user_bp.route("/connect/onboarding", methods=["POST"])
 @jwt_required()

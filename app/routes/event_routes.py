@@ -1,5 +1,4 @@
 from flask import Blueprint, current_app, jsonify, request
-from app.models.church import Church
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
@@ -14,7 +13,6 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
-from app.utils.churches import resolve_church_id
 from datetime import datetime, timedelta, timezone
 event_bp = Blueprint("event", __name__)
 
@@ -578,9 +576,8 @@ def get_event_attendees(event_id):
 
         # Get all attendees with detailed user information
         attendees = (
-            db.session.query(EventAttendee, User, Church)
+            db.session.query(EventAttendee, User)
             .join(User, EventAttendee.user_id == User.id)
-            .outerjoin(Church, User.church_id == Church.id)
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(
@@ -601,7 +598,6 @@ def get_event_attendees(event_id):
                 "age": user.calculate_age(),
                 "gender": user.gender.value if user.gender else None,
                 "phone": user.phone,
-                "church": church.name if church else "Other",
                 "registration_date": (
                     attendee.registration_date.isoformat()
                     if attendee.registration_date
@@ -614,7 +610,7 @@ def get_event_attendees(event_id):
                 ),
                 "status": attendee.status.value,
             }
-            for attendee, user, church in attendees
+            for attendee, user in attendees
         ]
 
         return jsonify(attendee_data), 200
@@ -704,27 +700,10 @@ def update_attendee_details(event_id, attendee_id):
                     400,
                 )
 
-        if "church" in data:
-            try:
-                user_to_update.church_id = resolve_church_id(data["church"])
-                updated_fields.append("church")
-
-            except Exception as e:
-                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-
         # Save changes if any fields were updated
         if updated_fields:
             db.session.commit()
-
-            # Refresh the user_to_update object to get the latest church data
             db.session.refresh(user_to_update)
-
-            # Get updated attendee data to return to frontend
-            church_name = "Other"
-            if user_to_update.church_id:
-                church = Church.query.get(user_to_update.church_id)
-                if church:
-                    church_name = church.name
 
             updated_attendee_data = {
                 "id": user_to_update.id,
@@ -742,7 +721,6 @@ def update_attendee_details(event_id, attendee_id):
                     user_to_update.gender.value if user_to_update.gender else None
                 ),
                 "phone": user_to_update.phone,
-                "church": church_name,
             }
 
             return (
@@ -1349,9 +1327,8 @@ def get_event_waitlist(event_id):
             return jsonify({"error": "Unauthorized to view event waitlist"}), 403
 
         waitlist_entries = (
-            db.session.query(EventWaitlist, User, Church)
+            db.session.query(EventWaitlist, User)
             .join(User, EventWaitlist.user_id == User.id)
-            .outerjoin(Church, User.church_id == Church.id)
             .filter(EventWaitlist.event_id == event_id)
             .order_by(EventWaitlist.waitlisted_at.asc())
             .all()
@@ -1368,7 +1345,6 @@ def get_event_waitlist(event_id):
                 "age": user.calculate_age(),
                 "gender": user.gender.value if user.gender else None,
                 "phone": user.phone,
-                "church": church.name if church else "Other",
                 "waitlisted_at": (
                     wl_entry.waitlisted_at.isoformat()
                     if wl_entry.waitlisted_at
@@ -1376,7 +1352,7 @@ def get_event_waitlist(event_id):
                 ),
                 "status": "Waitlisted",  # Explicitly set status
             }
-            for wl_entry, user, church in waitlist_entries
+            for wl_entry, user in waitlist_entries
         ]
         return jsonify(waitlist_data), 200
 
