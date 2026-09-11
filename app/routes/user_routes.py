@@ -204,7 +204,6 @@ def build_health_payload():
             "error": database_error,
         },
         "scheduler": {
-            "embedded_enabled": "embedded_scheduler" in current_app.extensions,
             "error": scheduler_error,
             "latest_auto_complete_run": serialize_scheduler_run(latest_auto_complete_run) if latest_auto_complete_run else None,
             "latest_reminder_run": serialize_scheduler_run(latest_reminder_run) if latest_reminder_run else None,

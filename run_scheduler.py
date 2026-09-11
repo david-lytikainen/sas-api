@@ -5,12 +5,12 @@ import time
 from dotenv import load_dotenv
 
 from app import create_app
-from app.scheduler import start_embedded_scheduler
+from app.scheduler import start_scheduler
 
 
 load_dotenv()
 app = create_app()
-scheduler = start_embedded_scheduler(app)
+scheduler = start_scheduler(app)
 _keep_running = True
 
 
@@ -25,7 +25,7 @@ signal.signal(signal.SIGTERM, _stop_scheduler)
 
 if scheduler is None:
     app.logger.error(
-        "Scheduler worker exited because the embedded scheduler did not start. Check ENABLE_EMBEDDED_SCHEDULER and environment configuration."
+        "Scheduler worker did not start."
     )
     raise SystemExit(1)
 

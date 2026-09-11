@@ -1,5 +1,3 @@
-import atexit
-import os
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Callable, Optional
@@ -23,24 +21,10 @@ _EMPTY_RUN_RETENTION_DAYS = 10
 _EMAIL_JOB_INTERVAL_SECONDS = 15 * 60
 
 
-def start_embedded_scheduler(app):
+def start_scheduler(app):
     global _scheduler
 
     if app.testing:
-        return None
-
-    if os.getenv("ENABLE_EMBEDDED_SCHEDULER", "true").lower() not in {
-        "1",
-        "true",
-        "t",
-        "yes",
-        "on",
-    }:
-        app.logger.info("Embedded scheduler is disabled by environment.")
-        return None
-
-    if _is_werkzeug_parent_process():
-        app.logger.info("Skipping embedded scheduler in Werkzeug reloader parent.")
         return None
 
     with _scheduler_lock:
@@ -82,20 +66,11 @@ def start_embedded_scheduler(app):
             misfire_grace_time=_EMAIL_JOB_INTERVAL_SECONDS,
         )
         scheduler.start()
-        atexit.register(_shutdown_scheduler)
         _scheduler = scheduler
-        app.extensions["embedded_scheduler"] = scheduler
         app.logger.info(
-            "Embedded scheduler started for the daily 9:00 AM auto-complete and 9:00 PM reminder jobs in Eastern time."
+            "Scheduler started for the daily 9:00 AM auto-complete and 9:00 PM reminder jobs in Eastern time."
         )
         return scheduler
-
-
-def _is_werkzeug_parent_process() -> bool:
-    return (
-        os.getenv("FLASK_ENV") == "development"
-        and os.getenv("WERKZEUG_RUN_MAIN") != "true"
-    )
 
 
 def _run_due_event_auto_complete(app):
