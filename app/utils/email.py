@@ -13,8 +13,6 @@ EMAIL_JOB_STATUS_PENDING = "pending"
 EMAIL_JOB_STATUS_PROCESSING = "processing"
 EMAIL_JOB_STATUS_SENT = "sent"
 EMAIL_JOB_STATUS_FAILED = "failed"
-EMAIL_JOB_MAX_ATTEMPTS = 3
-EMAIL_JOB_RETRY_DELAY = timedelta(minutes=5)
 EMAIL_JOB_SENT_RETENTION_DAYS = 30
 
 
@@ -46,7 +44,6 @@ def process_pending_email_jobs(now_utc: datetime | None = None, limit: int = 25)
     for job in jobs:
         try:
             job.status = EMAIL_JOB_STATUS_PROCESSING
-            job.attempts += 1
             job.last_error = None
             db.session.commit()
             _deliver_email_job(job)
@@ -60,11 +57,7 @@ def process_pending_email_jobs(now_utc: datetime | None = None, limit: int = 25)
             if not job:
                 continue
             job.last_error = str(exc)
-            if job.attempts >= EMAIL_JOB_MAX_ATTEMPTS:
-                job.status = EMAIL_JOB_STATUS_FAILED
-            else:
-                job.status = EMAIL_JOB_STATUS_PENDING
-                job.scheduled_for = comparison_time + EMAIL_JOB_RETRY_DELAY
+            job.status = EMAIL_JOB_STATUS_FAILED
             db.session.commit()
             current_app.logger.error(
                 f"Failed to process email job {job.id}: {str(exc)}", exc_info=True
