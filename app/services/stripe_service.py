@@ -186,6 +186,7 @@ class StripeService:
         session = stripe.checkout.Session.create(
             mode="payment",
             customer=customer_id,
+            payment_method_types=["card"],
             line_items=[
                 {
                     "price_data": {
@@ -193,16 +194,21 @@ class StripeService:
                         "unit_amount": unit_amount,
                         "product_data": {
                             "name": event.name,
-                            "description": "Event sign up. Non-refundable through app.",
+                            "description": event.description,
                         },
                     },
                     "quantity": 1,
                 }
             ],
             payment_intent_data=payment_intent_data,
+            wallet_options={
+                "link": {
+                    "display": "never",
+                }
+            },
             custom_text={
                 "submit": {
-                    "message": "Non-refundable through app. Contact event organizer for refund questions."
+                    "message": "Contact the event organizer for refund questions."
                 }
             },
             success_url=StripeService.append_query_params(
