@@ -371,7 +371,7 @@ def complete_event_registration_checkout():
     data = request.get_json() or {}
     session_id = data.get("session_id")
 
-    if not session_id or not isinstance(session_id, str):
+    if not isinstance(session_id, str) or not session_id.startswith("cs_"):
         return jsonify({"error": "A valid session_id is required."}), 400
 
     try:

@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 import stripe
 from flask import current_app
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from app.extensions import db
 from app.models import Event, EventPayment, User
 
@@ -237,7 +237,7 @@ class StripeService:
         query_items = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
         query_items.update({key: value for key, value in params.items() if value is not None})
         return urlunparse(
-            parsed_url._replace(query=urlencode(query_items))
+            parsed_url._replace(query=urlencode(query_items, quote_via=quote, safe="{}"))
         )
 
     @staticmethod
