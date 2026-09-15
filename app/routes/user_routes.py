@@ -5,11 +5,9 @@ from sqlalchemy import func, text
 from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 from app.models import Event, EventPayment, SchedulerJobRun, User
-from app.models.church import Church
 from app.models.enums import Gender
 from app.services.event_service import EventService
 from app.services.stripe_service import StripeService
-from app.utils.churches import resolve_church_id
 from app.utils.email import send_password_reset_email
 
 user_bp = Blueprint("user", __name__)
@@ -176,10 +174,22 @@ def build_health_payload():
         health_status = 503
 
     latest_auto_complete_run = None
+    latest_reminder_run = None
+    latest_email_job_run = None
     if database_ok:
         try:
             latest_auto_complete_run = (
                 SchedulerJobRun.query.filter_by(job_name="auto-complete-due-events")
+                .order_by(SchedulerJobRun.created_at.desc())
+                .first()
+            )
+            latest_reminder_run = (
+                SchedulerJobRun.query.filter_by(job_name="send-due-event-reminders")
+                .order_by(SchedulerJobRun.created_at.desc())
+                .first()
+            )
+            latest_email_job_run = (
+                SchedulerJobRun.query.filter_by(job_name="process-pending-email-jobs")
                 .order_by(SchedulerJobRun.created_at.desc())
                 .first()
             )
@@ -194,9 +204,10 @@ def build_health_payload():
             "error": database_error,
         },
         "scheduler": {
-            "embedded_enabled": "embedded_scheduler" in current_app.extensions,
             "error": scheduler_error,
             "latest_auto_complete_run": serialize_scheduler_run(latest_auto_complete_run) if latest_auto_complete_run else None,
+            "latest_reminder_run": serialize_scheduler_run(latest_reminder_run) if latest_reminder_run else None,
+            "latest_email_job_run": serialize_scheduler_run(latest_email_job_run) if latest_email_job_run else None,
         },
     }, health_status
 
@@ -212,8 +223,6 @@ def sign_up_user(user_data):
     except KeyError:
         raise ValueError("Invalid gender value. Must be either MALE or FEMALE")
 
-    church_id = resolve_church_id(user_data.get("current_church"))
-
     user = User(
         role_id=1,
         email=user_data["email"],
@@ -223,13 +232,12 @@ def sign_up_user(user_data):
         phone=user_data["phone"],
         gender=gender,
         birthday=datetime.strptime(user_data["birthday"], "%Y-%m-%d").date(),
-        church_id=church_id,
-        denomination_id=user_data.get("denomination_id"),
     )
 
     db.session.add(user)
     db.session.commit()
     access_token = create_access_token(identity=str(user.id))
+    current_app.logger.info("Account created for user %s.", user.id)
     return {"token": access_token, "user": user.to_dict()}
 
 
@@ -241,6 +249,7 @@ def sign_in_user(email, password):
         raise ValueError("Invalid password")
 
     access_token = create_access_token(identity=str(user.id))
+    current_app.logger.info("Sign-in succeeded for user %s.", user.id)
     return {"token": access_token, "user": user.to_dict()}
 
 
@@ -250,8 +259,11 @@ def send_forgot_password_email(email):
 
     if user:
         send_password_reset_email(user)
+        current_app.logger.info("Password reset requested for an existing account.")
         if current_app.testing:
             response["reset_token"] = user.reset_token
+    else:
+        current_app.logger.info("Password reset requested for an unknown account.")
     return response
 
 
@@ -264,6 +276,7 @@ def reset_user_password(token, new_password):
     user.reset_token = None
     user.reset_token_expiration = None
     db.session.commit()
+    current_app.logger.info("Password reset completed for user %s.", user.id)
     return {"message": "Your password has been reset successfully."}
 
 
@@ -311,10 +324,6 @@ def update_profile(user: User, data):
             raise ValueError("Invalid birthday format. Use YYYY-MM-DD")
         updated_fields.append("birthday")
 
-    if "current_church" in data:
-        user.church_id = resolve_church_id(data["current_church"])
-        updated_fields.append("current_church")
-
     db.session.commit()
     return {"message": "Profile updated successfully", "updated_fields": updated_fields, "user": user.to_dict()}
 
@@ -344,9 +353,11 @@ def sign_up():
         return make_response(jsonify(result), 201)
     except ValueError as e:
         if str(e) == "User already exists":
+            current_app.logger.warning("Sign-up rejected because the email already exists.")
             return (jsonify({"error": "An account already exists for this email. Please go to Sign In and use Forgot Password if needed."}),409,)
         return jsonify({"error": str(e)}), 400
     except Exception:
+        current_app.logger.error("Sign-up failed unexpectedly.", exc_info=True)
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
@@ -381,6 +392,7 @@ def sign_in():
         response = make_response(jsonify(result), 200)
         return response
     except ValueError as e:
+        current_app.logger.warning("Sign-in rejected due to invalid credentials.")
         return jsonify({"error": str(e)}), 401
     except Exception as e:
         current_app.logger.error(f"Login error: {str(e)}", exc_info=True)
@@ -512,14 +524,6 @@ def reset_password(token):
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
-@user_bp.route("/churches", methods=["GET"])
-def get_churches():
-    try:
-        churches = Church.query.order_by(Church.name.asc()).all()
-        return jsonify([church.name for church in churches]), 200
-    except Exception:
-        return jsonify({"error": "Failed to fetch churches"}), 500
-
 @user_bp.route("/connect/onboarding", methods=["POST"])
 @jwt_required()
 def create_connect_onboarding():
@@ -588,63 +592,7 @@ def stripe_webhook():
             checkout_type = metadata.get("checkout_type")
 
             if checkout_type == "event_registration":
-                user_id = metadata.get("user_id")
-                event_id = metadata.get("event_id")
-                payment = StripeService.upsert_checkout_session_payment(data_object)
-                if payment and payment.registration_status in {
-                    "registered",
-                    "registration_failed_refunded",
-                    "refund_failed",
-                }:
-                    return jsonify({"received": True}), 200
-                user = User.query.get(int(user_id)) if user_id else None
-                if user:
-                    user.stripe_customer_id = data_object.get("customer")
-                    db.session.commit()
-
-                if event_id and user_id:
-                    registration_response = EventService.register_for_event(
-                        int(event_id),
-                        int(user_id),
-                        join_waitlist=False,
-                        payment_confirmed=True,
-                    )
-                    if isinstance(registration_response, dict) and "error" in registration_response:
-                        failure_reason = registration_response["error"]
-                        if payment:
-                            payment.registration_status = "registration_failed"
-                            payment.failure_reason = failure_reason
-                            db.session.add(payment)
-                            db.session.commit()
-                        if payment:
-                            try:
-                                payment = StripeService.refund_payment(payment, failure_reason)
-                                payment.registration_status = "registration_failed_refunded"
-                                db.session.add(payment)
-                                db.session.commit()
-                            except Exception as refund_error:
-                                db.session.rollback()
-                                current_app.logger.error(
-                                    "Automatic refund failed for checkout session %s: %s",
-                                    data_object.get("id"),
-                                    str(refund_error),
-                                    exc_info=True,
-                                )
-                                if payment:
-                                    payment.refund_status = "failed"
-                                    payment.registration_status = "refund_failed"
-                                    payment.failure_reason = (
-                                        f"{failure_reason} | Refund error: {str(refund_error)}"
-                                    )
-                                    db.session.add(payment)
-                                    db.session.commit()
-                        current_app.logger.warning(
-                            f"Paid checkout completed but registration failed for user {user_id} event {event_id}: {registration_response['error']}"
-                        )
-                    elif payment:
-                        payment.registration_status = "registered"
-                        db.session.add(payment)
-                        db.session.commit()
+                StripeService.finalize_event_registration_checkout(data_object)
 
         elif event_type == "account.updated":
             metadata = data_object.get("metadata") or {}

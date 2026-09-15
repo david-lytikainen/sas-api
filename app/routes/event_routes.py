@@ -1,5 +1,4 @@
 from flask import Blueprint, current_app, jsonify, request
-from app.models.church import Church
 from app.models.event import Event
 from app.models.user import User
 from app.models.event_attendee import EventAttendee
@@ -14,10 +13,7 @@ from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
 from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
-from app.utils.churches import resolve_church_id
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import or_
-
 event_bp = Blueprint("event", __name__)
 
 def get_event_timer(event_id):
@@ -368,6 +364,42 @@ def create_event_registration_checkout(event_id):
         return jsonify({"error": "Failed to create checkout session"}), 500
 
 
+@event_bp.route("/events/checkout/complete", methods=["POST"])
+@jwt_required()
+def complete_event_registration_checkout():
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+
+    if not isinstance(session_id, str) or not session_id.startswith("cs_"):
+        return jsonify({"error": "A valid session_id is required."}), 400
+
+    try:
+        session_data = StripeService.retrieve_checkout_session(session_id)
+        metadata = session_data.get("metadata") or {}
+        if metadata.get("checkout_type") != "event_registration":
+            return jsonify({"error": "Checkout session is not an event registration session."}), 400
+
+        if metadata.get("user_id") != str(current_user_id):
+            return jsonify({"error": "You are not authorized to complete this checkout session."}), 403
+
+        result = StripeService.finalize_event_registration_checkout(session_data)
+        if "error" in result:
+            return jsonify(result), 400
+
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            "Error completing event checkout session %s: %s",
+            session_id,
+            str(e),
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to complete checkout session"}), 500
+
+
 @event_bp.route(
     "/events/<int:event_id>/cancel-registration", methods=["POST", "OPTIONS"]
 )
@@ -544,9 +576,8 @@ def get_event_attendees(event_id):
 
         # Get all attendees with detailed user information
         attendees = (
-            db.session.query(EventAttendee, User, Church)
+            db.session.query(EventAttendee, User)
             .join(User, EventAttendee.user_id == User.id)
-            .outerjoin(Church, User.church_id == Church.id)
             .filter(
                 EventAttendee.event_id == event_id,
                 EventAttendee.status.in_(
@@ -567,7 +598,6 @@ def get_event_attendees(event_id):
                 "age": user.calculate_age(),
                 "gender": user.gender.value if user.gender else None,
                 "phone": user.phone,
-                "church": church.name if church else "Other",
                 "registration_date": (
                     attendee.registration_date.isoformat()
                     if attendee.registration_date
@@ -580,7 +610,7 @@ def get_event_attendees(event_id):
                 ),
                 "status": attendee.status.value,
             }
-            for attendee, user, church in attendees
+            for attendee, user in attendees
         ]
 
         return jsonify(attendee_data), 200
@@ -590,147 +620,6 @@ def get_event_attendees(event_id):
             exc_info=True,
         )
         return jsonify({"error": f"Error retrieving attendees: {str(e)}"}), 500
-
-
-@event_bp.route(
-    "/events/<int:event_id>/attendees/<int:attendee_id>", methods=["PATCH", "OPTIONS"]
-)
-@cross_origin(supports_credentials=True)
-def update_attendee_details(event_id, attendee_id):
-    if request.method == "OPTIONS":
-        return "", 204
-
-    verify_jwt_in_request()
-    current_user_id = get_jwt_identity()
-
-    try:
-        # Get the event
-        event = Event.query.get_or_404(event_id)
-
-        # Get the user and verify permissions
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 403
-
-        # Check if user has permission to update attendees
-        if not current_user_can_manage_event(current_user, event):
-            return (
-                jsonify({"error": "Unauthorized to update attendee information"}),
-                403,
-            )
-
-        # Get request data
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No update data provided"}), 400
-
-        # Get the user to update
-        user_to_update = User.query.get_or_404(attendee_id)
-
-        # Also verify this user is actually registered for this event
-        attendee = EventAttendee.query.filter_by(
-            event_id=event_id, user_id=attendee_id
-        ).first()
-        if not attendee:
-            return jsonify({"error": "User is not registered for this event"}), 404
-
-        # Track which fields were updated
-        updated_fields = []
-
-        # Update user fields if provided
-        if "first_name" in data and data["first_name"]:
-            user_to_update.first_name = data["first_name"]
-            updated_fields.append("first_name")
-
-        if "last_name" in data and data["last_name"]:
-            user_to_update.last_name = data["last_name"]
-            updated_fields.append("last_name")
-
-        if "email" in data and data["email"]:
-            normalized_email = data["email"].strip().lower()
-            existing_user = User.query.filter_by(email=normalized_email).first()
-            if existing_user and existing_user.id != user_to_update.id:
-                return (
-                    jsonify({"error": "An account already exists for this email."}),
-                    400,
-                )
-            user_to_update.email = normalized_email
-            updated_fields.append("email")
-
-        if "gender" in data and data["gender"]:
-            try:
-                user_to_update.gender = Gender[data["gender"].upper()]
-                updated_fields.append("gender")
-            except KeyError:
-                return (
-                    jsonify(
-                        {"error": "Invalid gender value. Must be either MALE or FEMALE"}
-                    ),
-                    400,
-                )
-
-        if "church" in data:
-            try:
-                user_to_update.church_id = resolve_church_id(data["church"])
-                updated_fields.append("church")
-
-            except Exception as e:
-                return jsonify({"error": f"Error updating church: {str(e)}"}), 500
-
-        # Save changes if any fields were updated
-        if updated_fields:
-            db.session.commit()
-
-            # Refresh the user_to_update object to get the latest church data
-            db.session.refresh(user_to_update)
-
-            # Get updated attendee data to return to frontend
-            church_name = "Other"
-            if user_to_update.church_id:
-                church = Church.query.get(user_to_update.church_id)
-                if church:
-                    church_name = church.name
-
-            updated_attendee_data = {
-                "id": user_to_update.id,
-                "name": f"{user_to_update.first_name} {user_to_update.last_name}",
-                "email": user_to_update.email,
-                "first_name": user_to_update.first_name,
-                "last_name": user_to_update.last_name,
-                "birthday": (
-                    user_to_update.birthday.isoformat()
-                    if user_to_update.birthday
-                    else None
-                ),
-                "age": user_to_update.calculate_age(),
-                "gender": (
-                    user_to_update.gender.value if user_to_update.gender else None
-                ),
-                "phone": user_to_update.phone,
-                "church": church_name,
-            }
-
-            return (
-                jsonify(
-                    {
-                        "message": "Attendee details updated successfully",
-                        "updated_fields": updated_fields,
-                        "attendee": updated_attendee_data,
-                    }
-                ),
-                200,
-            )
-        else:
-            return jsonify({"message": "No fields were updated"}), 200
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(
-            f"Error updating attendee details for event {event_id}, attendee {attendee_id}: {str(e)}",
-            exc_info=True,
-        )
-        return jsonify({"error": f"Error updating attendee: {str(e)}"}), 500
 
 
 @event_bp.route(
@@ -1271,95 +1160,6 @@ def submit_speed_date_selections(event_id):
         return jsonify({"error": "Failed to submit speed date selections."}), 500
 
 
-@event_bp.route("/events/<int:event_id>/my-matches", methods=["GET"])
-@jwt_required()
-def get_my_matches(event_id):
-    current_user_id = get_jwt_identity()
-    user = User.query.get(current_user_id)
-
-    if not user:
-        return jsonify({"error": "User not found or token invalid"}), 401
-
-    event = Event.query.get(event_id)
-    if not event:
-        return jsonify({"error": "Event not found"}), 404
-
-    if event.status != EventStatus.COMPLETED.value:
-        return (
-            jsonify(
-                {"error": "Matches are only available after the event is completed."}
-            ),
-            400,
-        )
-
-    attendee_record = EventAttendee.query.filter(
-        EventAttendee.event_id == event_id,
-        EventAttendee.user_id == current_user_id,
-        EventAttendee.status == RegistrationStatus.CHECKED_IN,
-    ).first()
-
-    if not attendee_record:
-        return (
-            jsonify({"error": "You were not checked in for this event."}),
-            403,
-        )  # Changed error msg slightly
-
-    mutual_matches_query = EventSpeedDate.query.filter(
-        EventSpeedDate.event_id == event_id,
-        EventSpeedDate.male_interested == True,
-        EventSpeedDate.female_interested == True,
-        or_(
-            EventSpeedDate.male_id == current_user_id,
-            EventSpeedDate.female_id == current_user_id,
-        ),
-    ).all()
-
-    matches_details = []
-    if mutual_matches_query:
-        matched_partner_ids = set()
-        for record in mutual_matches_query:
-            partner_id = (
-                record.female_id
-                if record.male_id == current_user_id
-                else record.male_id
-            )
-            matched_partner_ids.add(partner_id)
-
-        if matched_partner_ids:
-            matched_users = User.query.filter(User.id.in_(matched_partner_ids)).all()
-            for matched_user in matched_users:
-                matches_details.append(
-                    {
-                        "id": matched_user.id,
-                        "first_name": matched_user.first_name,
-                        "last_name": matched_user.last_name,
-                        "email": matched_user.email,
-                        "age": matched_user.calculate_age(),
-                        "gender": (
-                            matched_user.gender.value if matched_user.gender else None
-                        ),
-                    }
-                )
-
-    return jsonify({"matches": matches_details}), 200
-
-
-@event_bp.route("/events/<int:event_id>/all-matches", methods=["GET", "OPTIONS"])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def get_all_matches_for_event(event_id):
-    if request.method == "OPTIONS":
-        return "", 204
-    return (
-        jsonify(
-            {
-                "error": "Event organizers and admins do not have match visibility in the current product flow."
-            }
-        ),
-        403,
-    )
-
-
 @event_bp.route("/events/<int:event_id>", methods=["DELETE", "OPTIONS"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
@@ -1404,9 +1204,8 @@ def get_event_waitlist(event_id):
             return jsonify({"error": "Unauthorized to view event waitlist"}), 403
 
         waitlist_entries = (
-            db.session.query(EventWaitlist, User, Church)
+            db.session.query(EventWaitlist, User)
             .join(User, EventWaitlist.user_id == User.id)
-            .outerjoin(Church, User.church_id == Church.id)
             .filter(EventWaitlist.event_id == event_id)
             .order_by(EventWaitlist.waitlisted_at.asc())
             .all()
@@ -1423,7 +1222,6 @@ def get_event_waitlist(event_id):
                 "age": user.calculate_age(),
                 "gender": user.gender.value if user.gender else None,
                 "phone": user.phone,
-                "church": church.name if church else "Other",
                 "waitlisted_at": (
                     wl_entry.waitlisted_at.isoformat()
                     if wl_entry.waitlisted_at
@@ -1431,7 +1229,7 @@ def get_event_waitlist(event_id):
                 ),
                 "status": "Waitlisted",  # Explicitly set status
             }
-            for wl_entry, user, church in waitlist_entries
+            for wl_entry, user in waitlist_entries
         ]
         return jsonify(waitlist_data), 200
 

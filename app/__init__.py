@@ -2,14 +2,12 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-import sentry_sdk
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from app.extensions import db, jwt
 from app.utils.email import mail
 from datetime import timedelta
 import logging
-from sentry_sdk.integrations.flask import FlaskIntegration
 
 # Load environment variables
 load_dotenv()
@@ -30,23 +28,6 @@ def _get_required_origins() -> list[str]:
     return origins
 
 
-def _init_sentry(app: Flask) -> None:
-    sentry_dsn = os.getenv("SENTRY_DSN", "").strip()
-    if not sentry_dsn:
-        app.logger.info("Sentry is not configured; skipping error monitoring init.")
-        return
-
-    sentry_sdk.init(
-        dsn=sentry_dsn,
-        integrations=[FlaskIntegration()],
-        environment=os.getenv(
-            "SENTRY_ENVIRONMENT", os.getenv("FLASK_ENV", "production")
-        ),
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0")),
-    )
-    app.logger.info("Sentry error monitoring initialized.")
-
-
 def create_app():
     app = Flask(__name__)
 
@@ -56,7 +37,6 @@ def create_app():
     # Configure logging
     logging.basicConfig(level=logging.INFO)
     app.logger.setLevel(logging.INFO)
-    _init_sentry(app)
 
     # Configure database
     app.config["SQLALCHEMY_DATABASE_URI"] = _require_env("DATABASE_URL")
@@ -123,7 +103,7 @@ def create_app():
 
     # Set up CORS
     cors_origins = _get_required_origins()
-    app.logger.info(f"Initializing CORS with origins: {cors_origins}")
+    app.logger.info("Initializing CORS for %s allowed origin(s).", len(cors_origins))
 
     # Use more specific CORS configuration for API
     CORS(
@@ -148,7 +128,8 @@ def create_app():
         static_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static/sounds"
         )
-        app.logger.info(f"Serving sound file {filename} from {static_dir}")
+        app.logger.info("Serving sound file %s.", filename)
         return send_from_directory(static_dir, filename)
 
+    app.logger.info("Application startup complete.")
     return app

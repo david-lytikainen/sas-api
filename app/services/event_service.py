@@ -4,6 +4,7 @@ from decimal import Decimal
 import math
 from typing import List
 from zoneinfo import ZoneInfo
+from flask import current_app
 from app.extensions import db
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.models import Event, EventAttendee
@@ -182,6 +183,9 @@ class EventService:
         if attendee and organizer:
             send_event_registration_confirmation_email(attendee, event, organizer)
 
+        current_app.logger.info(
+            "User %s registered for event %s.", user_id, event_id
+        )
         return {"message": "Successfully registered for event"}
 
     @staticmethod
@@ -211,10 +215,19 @@ class EventService:
             return {"error": "You are already on the waitlist for this event"}
         try:
             EventWaitlistRepository.add_to_waitlist(event_id, user_id)
+            current_app.logger.info(
+                "User %s joined the waitlist for event %s.", user_id, event_id
+            )
             return {"message": "Successfully joined the waitlist for the event"}
-        except Exception as e:
-            # Log the exception e
-            return {"error": f"Could not join waitlist: {str(e)}"}
+        except Exception as exc:
+            current_app.logger.error(
+                "Failed to add user %s to the waitlist for event %s: %s",
+                user_id,
+                event_id,
+                str(exc),
+                exc_info=True,
+            )
+            return {"error": f"Could not join waitlist: {str(exc)}"}
 
     @staticmethod
     def cancel_registration(event_id: int, user_id: int):

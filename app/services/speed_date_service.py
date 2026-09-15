@@ -110,14 +110,6 @@ class SpeedDateService:
                 interested_field = "female_interested"
                 partner_interested_field = "male_interested"
 
-            user_church = "Other"
-            if user.church_id:
-                from app.models.church import Church
-
-                church = Church.query.get(user.church_id)
-                if church:
-                    user_church = church.name
-
             user_age = user.calculate_age()
 
             schedule = []
@@ -126,14 +118,6 @@ class SpeedDateService:
                 partner = User.query.get(partner_id)
 
                 if partner:
-                    partner_church = "Other"
-                    if partner.church_id:
-                        from app.models.church import Church
-
-                        church = Church.query.get(partner.church_id)
-                        if church:
-                            partner_church = church.name
-
                     partner_age = partner.calculate_age()
                     user_interested = getattr(date, interested_field)
                     partner_interested = getattr(date, partner_interested_field)
@@ -146,10 +130,8 @@ class SpeedDateService:
                             "partner_id": partner_id,
                             "partner_name": f"{partner.first_name} {partner.last_name}",
                             "partner_age": partner_age,
-                            "partner_church": partner_church,
                             "partner_email": partner.email,
                             "user_age": user_age,
-                            "user_church": user_church,
                             "event_speed_date_id": date.id,
                             "match": is_match,
                             "user_interested": user_interested
