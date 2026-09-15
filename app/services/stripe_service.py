@@ -235,6 +235,9 @@ class StripeService:
                 "organizer_user_id": str(organizer.id),
             },
         )
+        current_app.logger.info(
+            "Checkout created for user %s and event %s.", attendee.id, event.id
+        )
         return session.url
 
     @staticmethod
@@ -379,6 +382,10 @@ class StripeService:
             db.session.add(payment)
             db.session.commit()
 
+        current_app.logger.info(
+            "Paid checkout completed for user %s and event %s.", user_id, event_id
+        )
+
         return {
             "message": registration_response.get(
                 "message", "Successfully registered for event"
@@ -419,6 +426,12 @@ class StripeService:
         payment.failure_reason = reason
         db.session.add(payment)
         db.session.commit()
+        current_app.logger.info(
+            "Refund completed for payment %s, user %s, and event %s.",
+            payment.id,
+            payment.user_id,
+            payment.event_id,
+        )
         return payment
 
     @staticmethod

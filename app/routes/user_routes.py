@@ -237,6 +237,7 @@ def sign_up_user(user_data):
     db.session.add(user)
     db.session.commit()
     access_token = create_access_token(identity=str(user.id))
+    current_app.logger.info("Account created for user %s.", user.id)
     return {"token": access_token, "user": user.to_dict()}
 
 
@@ -248,6 +249,7 @@ def sign_in_user(email, password):
         raise ValueError("Invalid password")
 
     access_token = create_access_token(identity=str(user.id))
+    current_app.logger.info("Sign-in succeeded for user %s.", user.id)
     return {"token": access_token, "user": user.to_dict()}
 
 
@@ -257,8 +259,11 @@ def send_forgot_password_email(email):
 
     if user:
         send_password_reset_email(user)
+        current_app.logger.info("Password reset requested for an existing account.")
         if current_app.testing:
             response["reset_token"] = user.reset_token
+    else:
+        current_app.logger.info("Password reset requested for an unknown account.")
     return response
 
 
@@ -271,6 +276,7 @@ def reset_user_password(token, new_password):
     user.reset_token = None
     user.reset_token_expiration = None
     db.session.commit()
+    current_app.logger.info("Password reset completed for user %s.", user.id)
     return {"message": "Your password has been reset successfully."}
 
 
@@ -347,9 +353,11 @@ def sign_up():
         return make_response(jsonify(result), 201)
     except ValueError as e:
         if str(e) == "User already exists":
+            current_app.logger.warning("Sign-up rejected because the email already exists.")
             return (jsonify({"error": "An account already exists for this email. Please go to Sign In and use Forgot Password if needed."}),409,)
         return jsonify({"error": str(e)}), 400
     except Exception:
+        current_app.logger.error("Sign-up failed unexpectedly.", exc_info=True)
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
@@ -384,6 +392,7 @@ def sign_in():
         response = make_response(jsonify(result), 200)
         return response
     except ValueError as e:
+        current_app.logger.warning("Sign-in rejected due to invalid credentials.")
         return jsonify({"error": str(e)}), 401
     except Exception as e:
         current_app.logger.error(f"Login error: {str(e)}", exc_info=True)

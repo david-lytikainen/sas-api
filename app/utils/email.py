@@ -84,15 +84,7 @@ def send_password_reset_email(user):
     app = current_app._get_current_object()
 
     if app.testing:
-        app.logger.info("--- MOCK EMAIL ---")
-        app.logger.info(f"To: {user.email}")
-        app.logger.info("Subject: Password Reset Request")
-        app.logger.info(
-            f"Body: To reset your password, visit the following link:\n"
-            f"{app.config.get('CLIENT_URL')}/reset-password/{token}"
-        )
-        app.logger.info(f"Reset Token: {token}")
-        app.logger.info("--- END MOCK EMAIL ---")
+        app.logger.info("Mock password-reset email generated for user %s.", user.id)
         return
 
     _send_immediate_email(
@@ -106,16 +98,13 @@ def send_password_reset_email(user):
 
 def send_waitlist_spot_open_email(user, event):
     app = current_app._get_current_object()
-    signup_url = f"{app.config.get('CLIENT_URL')}/events?view=all"
 
     if app.testing:
-        app.logger.info("--- MOCK EMAIL ---")
-        app.logger.info(f"To: {user.email}")
-        app.logger.info("Subject: Saved & Single Event Spot Opened")
         app.logger.info(
-            f"Body: A spot opened for {event.name}. Visit {signup_url} to sign up now."
+            "Mock waitlist-open email generated for user %s and event %s.",
+            user.id,
+            event.id,
         )
-        app.logger.info("--- END MOCK EMAIL ---")
         return
 
     _send_immediate_email(
@@ -129,19 +118,13 @@ def send_waitlist_spot_open_email(user, event):
 
 def send_event_registration_confirmation_email(user, event, organizer):
     app = current_app._get_current_object()
-    event_url = f"{app.config.get('CLIENT_URL')}/events?view=all"
-    event_time = event.starts_at.astimezone(EMAIL_TIMEZONE).strftime(
-        "%A, %B %-d, %Y at %-I:%M %p %Z"
-    )
 
     if app.testing:
-        app.logger.info("--- MOCK EMAIL ---")
-        app.logger.info(f"To: {user.email}")
-        app.logger.info("Subject: Saved & Single Event Registration Confirmed")
         app.logger.info(
-            f'Body: Registered for {event.name} on {event_time}. Open {event_url}.'
+            "Mock registration-confirmation email generated for user %s and event %s.",
+            user.id,
+            event.id,
         )
-        app.logger.info("--- END MOCK EMAIL ---")
         return
 
     _send_immediate_email(
@@ -156,19 +139,14 @@ def send_event_registration_confirmation_email(user, event, organizer):
 
 def send_event_reminder_email(user, event, organizer, reminder_label: str):
     app = current_app._get_current_object()
-    event_url = f"{app.config.get('CLIENT_URL')}/events?view=all"
-    event_time = event.starts_at.astimezone(EMAIL_TIMEZONE).strftime(
-        "%A, %B %-d, %Y at %-I:%M %p %Z"
-    )
 
     if app.testing:
-        app.logger.info("--- MOCK EMAIL ---")
-        app.logger.info(f"To: {user.email}")
-        app.logger.info(f"Subject: Saved & Single Event Reminder ({reminder_label})")
         app.logger.info(
-            f'Body: Reminder for {event.name} on {event_time}. Open {event_url}.'
+            "Mock %s reminder email generated for user %s and event %s.",
+            reminder_label,
+            user.id,
+            event.id,
         )
-        app.logger.info("--- END MOCK EMAIL ---")
         return
 
     enqueue_email_job(

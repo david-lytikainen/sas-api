@@ -103,7 +103,7 @@ def create_app():
 
     # Set up CORS
     cors_origins = _get_required_origins()
-    app.logger.info(f"Initializing CORS with origins: {cors_origins}")
+    app.logger.info("Initializing CORS for %s allowed origin(s).", len(cors_origins))
 
     # Use more specific CORS configuration for API
     CORS(
@@ -128,7 +128,8 @@ def create_app():
         static_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static/sounds"
         )
-        app.logger.info(f"Serving sound file {filename} from {static_dir}")
+        app.logger.info("Serving sound file %s.", filename)
         return send_from_directory(static_dir, filename)
 
+    app.logger.info("Application startup complete.")
     return app
