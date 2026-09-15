@@ -11,7 +11,7 @@ from app.utils.email import process_pending_email_jobs
 
 
 _EMPTY_RUN_RETENTION_DAYS = 10
-_EMAIL_JOB_INTERVAL_SECONDS = 5 * 60
+_EMAIL_JOB_INTERVAL_SECONDS = 60
 
 
 def start_scheduler(app):

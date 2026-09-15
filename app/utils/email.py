@@ -28,7 +28,7 @@ def enqueue_email_job(job_type: str, payload: dict, scheduled_for: datetime | No
     return job
 
 
-def process_pending_email_jobs(now_utc: datetime | None = None, limit: int = 25) -> int:
+def process_pending_email_jobs(now_utc: datetime | None = None, limit: int = 100) -> int:
     comparison_time = now_utc or datetime.now(timezone.utc)
     jobs = (
         EmailJob.query.filter(
