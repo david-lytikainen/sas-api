@@ -1,2 +1,0 @@
-ALTER TABLE email_jobs
-DROP COLUMN IF EXISTS attempts;
