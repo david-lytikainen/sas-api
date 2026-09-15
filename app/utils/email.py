@@ -95,7 +95,7 @@ def send_password_reset_email(user):
         app.logger.info("--- END MOCK EMAIL ---")
         return
 
-    enqueue_email_job(
+    _send_immediate_email(
         "password_reset",
         {
             "user_id": user.id,
@@ -118,7 +118,7 @@ def send_waitlist_spot_open_email(user, event):
         app.logger.info("--- END MOCK EMAIL ---")
         return
 
-    enqueue_email_job(
+    _send_immediate_email(
         "waitlist_spot_open",
         {
             "user_id": user.id,
@@ -144,7 +144,7 @@ def send_event_registration_confirmation_email(user, event, organizer):
         app.logger.info("--- END MOCK EMAIL ---")
         return
 
-    enqueue_email_job(
+    _send_immediate_email(
         "registration_confirmation",
         {
             "user_id": user.id,
@@ -182,20 +182,33 @@ def send_event_reminder_email(user, event, organizer, reminder_label: str):
     )
 
 
+def _send_immediate_email(job_type: str, payload: dict):
+    try:
+        _deliver_email_payload(job_type, payload)
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to send %s email immediately: %s", job_type, str(exc), exc_info=True
+        )
+
+
 def _deliver_email_job(job: EmailJob):
-    if job.job_type == "password_reset":
-        _deliver_password_reset_email(job.payload)
+    _deliver_email_payload(job.job_type, job.payload)
+
+
+def _deliver_email_payload(job_type: str, payload: dict):
+    if job_type == "password_reset":
+        _deliver_password_reset_email(payload)
         return
-    if job.job_type == "waitlist_spot_open":
-        _deliver_waitlist_spot_open_email(job.payload)
+    if job_type == "waitlist_spot_open":
+        _deliver_waitlist_spot_open_email(payload)
         return
-    if job.job_type == "registration_confirmation":
-        _deliver_registration_confirmation_email(job.payload)
+    if job_type == "registration_confirmation":
+        _deliver_registration_confirmation_email(payload)
         return
-    if job.job_type == "event_reminder":
-        _deliver_event_reminder_email(job.payload)
+    if job_type == "event_reminder":
+        _deliver_event_reminder_email(payload)
         return
-    raise ValueError(f"Unsupported email job type: {job.job_type}")
+    raise ValueError(f"Unsupported email job type: {job_type}")
 
 
 def _deliver_password_reset_email(payload: dict):
