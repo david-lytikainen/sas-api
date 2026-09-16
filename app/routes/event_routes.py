@@ -445,6 +445,19 @@ def generate_schedules(event_id):
                 400,
             )
 
+        attendees = SpeedDateService.get_checked_in_attendees(event_id)
+        has_male = any(attendee.gender == Gender.MALE for attendee in attendees)
+        has_female = any(attendee.gender == Gender.FEMALE for attendee in attendees)
+        if not has_male or not has_female:
+            return (
+                jsonify(
+                    {
+                        "error": "Schedule generation requires at least one checked-in male and one checked-in female."
+                    }
+                ),
+                400,
+            )
+
         num_rounds_actual, num_tables_actual = SpeedDateService.generate_schedule(
             event_id, num_tables, num_rounds
         )
