@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import sentry_sdk
 from app.extensions import db, jwt
 from app.utils.email import mail
 from datetime import timedelta
@@ -37,6 +38,10 @@ def create_app():
     # Configure logging
     logging.basicConfig(level=logging.INFO)
     app.logger.setLevel(logging.INFO)
+
+    sentry_dsn = os.getenv("SENTRY_DSN", "").strip()
+    if sentry_dsn:
+        sentry_sdk.init(dsn=sentry_dsn, send_default_pii=False)
 
     # Configure database
     app.config["SQLALCHEMY_DATABASE_URI"] = _require_env("DATABASE_URL")
