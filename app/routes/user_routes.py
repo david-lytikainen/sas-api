@@ -546,6 +546,25 @@ def create_connect_onboarding():
         return jsonify({"error": "Failed to create Stripe Connect onboarding link"}), 500
 
 
+@user_bp.route("/connect/dashboard", methods=["POST"])
+@jwt_required()
+def create_connect_dashboard_link():
+    current_user_id = get_jwt_identity()
+
+    try:
+        user = User.query.get_or_404(current_user_id)
+        dashboard_url = StripeService.create_connect_dashboard_login_link(user)
+        return jsonify({"url": dashboard_url}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Error creating Stripe dashboard link for user {current_user_id}: {str(e)}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to open Stripe dashboard"}), 500
+
+
 @user_bp.route("/organizer-status/refresh", methods=["POST"])
 @jwt_required()
 def refresh_organizer_status():

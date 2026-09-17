@@ -98,11 +98,25 @@ class StripeService:
         if user.stripe_connected_account_id:
             return user.stripe_connected_account_id
 
+        country = current_app.config.get("STRIPE_CONNECT_COUNTRY", "US")
+        phone_digits = "".join(character for character in user.phone if character.isdigit())
+        phone = f"+1{phone_digits}" if country == "US" and len(phone_digits) == 10 else user.phone
         account = stripe.Account.create(
             type="express",
-            country=current_app.config.get("STRIPE_CONNECT_COUNTRY", "US"),
+            country=country,
             email=user.email,
             business_type="individual",
+            individual={
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "phone": phone,
+                "dob": {
+                    "day": user.birthday.day,
+                    "month": user.birthday.month,
+                    "year": user.birthday.year,
+                },
+            },
             business_profile={
                 "mcc": "7999",
                 "product_description": "Hosting a speed dating event",
@@ -140,6 +154,15 @@ class StripeService:
             },
         )
         return account_link.url
+
+    @staticmethod
+    def create_connect_dashboard_login_link(user: User) -> str:
+        StripeService.require_configured()
+        if not user.stripe_connected_account_id:
+            raise ValueError("Stripe Connect setup is required.")
+
+        login_link = stripe.Account.create_login_link(user.stripe_connected_account_id)
+        return login_link.url
 
     @staticmethod
     def sync_connect_status(user: User) -> User:
