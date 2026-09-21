@@ -25,6 +25,12 @@ class User(db.Model):
     stripe_customer_id = db.Column(db.String(255), nullable=True)
     stripe_connected_account_id = db.Column(db.String(255), nullable=True)
     stripe_connect_onboarding_complete = db.Column(db.Boolean, nullable=True)
+    faith_importance = db.Column(db.Integer, nullable=True)
+    traditional_roles_importance = db.Column(db.Integer, nullable=True)
+    boundaries_importance = db.Column(db.Integer, nullable=True)
+    looks_importance = db.Column(db.Integer, nullable=True)
+    wants_kids = db.Column(db.Integer, nullable=True)
+    age_gap = db.Column(db.Integer, nullable=True)
     updated_at = db.Column(
         db.TIMESTAMP(timezone=True),
         nullable=False,
@@ -85,6 +91,12 @@ class User(db.Model):
             "created_event_count": created_event_count,
             "has_started_stripe_setup": bool(self.stripe_connected_account_id),
             "stripe_connect_onboarding_complete": self.stripe_connect_onboarding_complete,
+            "faith_importance": self.faith_importance,
+            "traditional_roles_importance": self.traditional_roles_importance,
+            "boundaries_importance": self.boundaries_importance,
+            "looks_importance": self.looks_importance,
+            "wants_kids": self.wants_kids,
+            "age_gap": self.age_gap,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

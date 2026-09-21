@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS users (
     stripe_customer_id VARCHAR(255),
     stripe_connected_account_id VARCHAR(255),
     stripe_connect_onboarding_complete BOOLEAN,
+    faith_importance INTEGER,
+    traditional_roles_importance INTEGER,
+    boundaries_importance INTEGER,
+    looks_importance INTEGER,
+    wants_kids INTEGER,
+    age_gap INTEGER,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

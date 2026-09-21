@@ -288,6 +288,14 @@ def health_check():
 
 def update_profile(user: User, data):
     updated_fields = []
+    preference_options = {
+        "faith_importance": {1, 2, 3, 4, 5},
+        "traditional_roles_importance": {1, 2, 3, 4, 5},
+        "boundaries_importance": {1, 2, 3, 4, 5},
+        "looks_importance": {1, 2, 3, 4, 5},
+        "wants_kids": {1, 2, 3},
+        "age_gap": {3, 4, 5, 6, 7},
+    }
 
     if "first_name" in data and data["first_name"]:
         user.first_name = data["first_name"].strip()
@@ -323,6 +331,15 @@ def update_profile(user: User, data):
         except ValueError:
             raise ValueError("Invalid birthday format. Use YYYY-MM-DD")
         updated_fields.append("birthday")
+
+    for field, allowed_values in preference_options.items():
+        if field not in data:
+            continue
+        value = data[field]
+        if value is not None and (type(value) is not int or value not in allowed_values):
+            raise ValueError(f"Invalid value for {field}")
+        setattr(user, field, value)
+        updated_fields.append(field)
 
     db.session.commit()
     return {"message": "Profile updated successfully", "updated_fields": updated_fields, "user": user.to_dict()}
