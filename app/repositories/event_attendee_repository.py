@@ -18,6 +18,15 @@ class EventAttendeeRepository:
         )
 
     @staticmethod
+    def find_by_event_id_and_status(event_id: int, statuses: List[RegistrationStatus]) -> List[User]:
+        return (
+            db.session.query(User)
+            .join(EventAttendee, User.id == EventAttendee.user_id)
+            .filter(EventAttendee.event_id == event_id, EventAttendee.status.in_(statuses))
+            .all()
+        )
+
+    @staticmethod
     def find_by_event_and_user(event_id: int, user_id: int) -> EventAttendee:
         """Find an attendee registration by event_id and user_id"""
         return EventAttendee.query.filter_by(event_id=event_id, user_id=user_id).first()

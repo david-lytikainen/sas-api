@@ -160,6 +160,20 @@ def send_event_reminder_email(user, event, organizer, reminder_label: str):
     )
 
 
+def send_event_completed_email(user, event):
+    app = current_app._get_current_object()
+
+    if app.testing:
+        app.logger.info(
+            "Mock event-completed email generated for user %s and event %s.",
+            user.id,
+            event.id,
+        )
+        return
+
+    enqueue_email_job("event_completed", {"user_id": user.id, "event_id": event.id})
+
+
 def _send_immediate_email(job_type: str, payload: dict):
     try:
         _deliver_email_payload(job_type, payload)
@@ -185,6 +199,9 @@ def _deliver_email_payload(job_type: str, payload: dict):
         return
     if job_type == "event_reminder":
         _deliver_event_reminder_email(payload)
+        return
+    if job_type == "event_completed":
+        _deliver_event_completed_email(payload)
         return
     raise ValueError(f"Unsupported email job type: {job_type}")
 
@@ -288,6 +305,27 @@ def _deliver_event_reminder_email(payload: dict):
         f"Organizer: {organizer_name}\n"
         f"Organizer email: {organizer.email}\n\n"
         "If your plans change, you can cancel through the website, but refunds are not handled through the app.\n\n"
+        f"Open the site: {event_url}\n\n"
+        "Saved & Single"
+    )
+    mail.send(msg)
+
+
+def _deliver_event_completed_email(payload: dict):
+    user = User.query.get(payload["user_id"])
+    event = Event.query.get(payload["event_id"])
+    if not user or not event:
+        raise ValueError("Event completed email dependencies are missing.")
+
+    event_url = f"{current_app.config.get('CLIENT_URL')}/events?view=all"
+    msg = Message(
+        f"Your matches are ready: {event.name}",
+        sender=("Saved & Single", current_app.config.get("MAIL_USERNAME")),
+        recipients=[user.email],
+    )
+    msg.body = (
+        f"Hi {user.first_name},\n\n"
+        f'"{event.name}" is complete. Visit Saved & Single to see whether you have any matches.\n\n'
         f"Open the site: {event_url}\n\n"
         "Saved & Single"
     )

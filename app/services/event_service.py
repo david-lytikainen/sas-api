@@ -14,7 +14,7 @@ from app.repositories.event_repository import EventRepository
 from app.repositories.event_waitlist_repository import EventWaitlistRepository
 from app.repositories.user_repository import UserRepository
 from app.services.stripe_service import StripeService
-from app.utils.email import send_event_registration_confirmation_email, send_event_reminder_email, send_waitlist_spot_open_email
+from app.utils.email import send_event_completed_email, send_event_registration_confirmation_email, send_event_reminder_email, send_waitlist_spot_open_email
 
 
 class EventService:
@@ -34,6 +34,11 @@ class EventService:
                 < comparison_time_est.date()
             ):
                 event.status = EventStatus.COMPLETED.value
+                attendees = EventAttendeeRepository.find_by_event_id_and_status(
+                    event.id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
+                )
+                for attendee in attendees:
+                    send_event_completed_email(attendee, event)
                 updated_count += 1
 
         if updated_count:
