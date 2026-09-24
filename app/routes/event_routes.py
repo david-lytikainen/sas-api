@@ -437,10 +437,13 @@ def generate_schedules(event_id):
 
         if not current_user_can_manage_event(current_user, event):
             return jsonify({"error": "Unauthorized"}), 403
-        if event.status != EventStatus.REGISTRATION_OPEN.value:
+        if event.status not in [
+            EventStatus.REGISTRATION_OPEN.value,
+            EventStatus.IN_PROGRESS.value,
+        ]:
             return (
                 jsonify(
-                    {"error": "Event cannot be started (must be Registration Open)"}
+                    {"error": "Schedules can only be generated for open or in-progress events"}
                 ),
                 400,
             )
@@ -1171,30 +1174,6 @@ def submit_speed_date_selections(event_id):
             exc_info=True,
         )
         return jsonify({"error": "Failed to submit speed date selections."}), 500
-
-
-@event_bp.route("/events/<int:event_id>", methods=["DELETE", "OPTIONS"])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def delete_event_route(event_id):
-    if request.method == "OPTIONS":
-        return "", 204
-
-    current_user_id = get_jwt_identity()
-
-    try:
-        response_message, status_code = EventService.delete_event(
-            event_id, current_user_id
-        )
-        return jsonify(response_message), status_code
-    except UnauthorizedError as e:
-        return jsonify({"error": str(e)}), 403
-    except Exception as e:
-        # db.session.rollback() # Rollback is handled in repository or should be if critical
-        current_app.logger.error(
-            f"Error deleting event {event_id}: {str(e)}", exc_info=True
-        )
-        return jsonify({"error": "Failed to delete event"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/waitlist", methods=["GET", "OPTIONS"])

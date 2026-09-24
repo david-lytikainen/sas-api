@@ -66,18 +66,6 @@ class EventAttendeeRepository:
         return registration
 
     @staticmethod
-    def delete_by_event_id(event_id: int):
-        """Deletes all attendee registrations for a given event_id."""
-        try:
-            num_deleted = EventAttendee.query.filter_by(event_id=event_id).delete()
-            db.session.commit()
-            return num_deleted
-        except Exception as e:
-            db.session.rollback()
-            # Log error e, for example: current_app.logger.error(f"Error deleting attendees for event {event_id}: {str(e)}")
-            raise e  # Re-raise the exception to be handled by the service/route
-
-    @staticmethod
     def update_registration_status(
         registration: EventAttendee, new_status: RegistrationStatus, check_in_date=None
     ):

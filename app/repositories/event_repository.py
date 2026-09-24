@@ -25,8 +25,3 @@ class EventRepository:
                 setattr(event, key, value)
         db.session.commit()
         return event
-
-    @staticmethod
-    def delete_event(event: Event):
-        db.session.delete(event)
-        db.session.commit()

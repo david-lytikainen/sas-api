@@ -72,7 +72,7 @@ class EventService:
         if missing:
             raise MissingFieldsError(missing)
         if user.role_id != 3:
-            is_intro_event = Event.query.filter_by(creator_id=user_id).count() < 2
+            is_intro_event = Event.query.filter_by(creator_id=user_id).count() < StripeService.INTRO_EVENT_LIMIT
             minimum_price = StripeService.minimum_ticket_price(is_intro_event)
             if Decimal(str(data["price_per_person"])) < minimum_price:
                 return {
@@ -491,39 +491,3 @@ class EventService:
 
         updated_event = EventRepository.update_event(event, update_data)
         return updated_event, {"message": "Event updated successfully"}, 200
-
-    @staticmethod
-    def delete_event(event_id: int, user_id: int):
-        event = EventRepository.get_event(event_id)
-        if not event:
-            return {"error": f"Event with ID {event_id} not found"}, 404
-
-        user = UserRepository.find_by_id(user_id)
-        if not user:
-            return {"error": "User not found"}, 404  # Should not happen
-
-        # Admin can delete any event, Organizer can only delete their own
-        if not (
-            user.role_id == 3
-            or (
-                StripeService.user_can_manage_events(user)
-                and str(event.creator_id) == str(user_id)
-            )
-        ):
-            raise UnauthorizedError("You are not authorized to delete this event.")
-
-        if event.status in [EventStatus.IN_PROGRESS.value, EventStatus.COMPLETED.value]:
-            return {
-                "error": f"Event is {event.status} and cannot be deleted."
-            }, 400
-
-        try:
-            EventAttendeeRepository.delete_by_event_id(
-                event_id
-            )  # Delete attendees first
-            EventRepository.delete_event(event)
-            return {"message": "Event deleted successfully"}, 200
-        except Exception as e:
-            return {
-                "error": f"An error occurred while deleting the event: {str(e)}"
-            }, 500

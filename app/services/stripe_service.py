@@ -7,7 +7,7 @@ from app.models import Event, EventPayment, User
 
 
 class StripeService:
-    INTRO_EVENT_LIMIT = 2
+    INTRO_EVENT_LIMIT = 1
     INTRO_FIXED_FEE = Decimal("1.00")
     INTRO_PERCENT_FEE = Decimal("5.0")
     STANDARD_FIXED_FEE = Decimal("1.50")

@@ -84,6 +84,7 @@ class SpeedDateMatcher:
 
     @staticmethod
     def min_dates_threshold(num_tables, num_rounds, num_same_gender) -> int:
+        # returns the max amount of dates that a gender could have
         if num_same_gender == 0:
             return 0
         max_dates = math.ceil(num_tables * (num_rounds / num_same_gender))
