@@ -14,10 +14,6 @@ class StripeService:
     STANDARD_PERCENT_FEE = Decimal("8.0")
 
     @staticmethod
-    def is_configured() -> bool:
-        return bool(current_app.config.get("STRIPE_SECRET_KEY"))
-
-    @staticmethod
     def configure():
         stripe.api_key = current_app.config.get("STRIPE_SECRET_KEY")
 

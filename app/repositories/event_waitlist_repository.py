@@ -1,6 +1,5 @@
 from app.extensions import db
 from app.models.event_waitlist import EventWaitlist
-from app.models.user import User  # For type hinting or joining if needed
 from typing import List, Optional
 
 
@@ -26,11 +25,6 @@ class EventWaitlistRepository:
             .order_by(EventWaitlist.waitlisted_at.asc())
             .all()
         )
-
-    @staticmethod
-    def count_by_event_id(event_id: int) -> int:
-        """Counts the number of users on the waitlist for a specific event."""
-        return EventWaitlist.query.filter_by(event_id=event_id).count()
 
     @staticmethod
     def remove_from_waitlist(event_id: int, user_id: int) -> bool:

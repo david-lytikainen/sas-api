@@ -6,7 +6,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 from app.models import Event, EventPayment, SchedulerJobRun, User
 from app.models.enums import Gender
-from app.services.event_service import EventService
 from app.services.stripe_service import StripeService
 from app.utils.email import send_password_reset_email
 

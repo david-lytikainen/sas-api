@@ -760,7 +760,7 @@ def get_timer_status(event_id):
         if not current_user:
             return jsonify({"error": "User not found"}), 403
 
-        event = Event.query.get_or_404(event_id)
+        Event.query.get_or_404(event_id)
 
         timer = get_event_timer(event_id)
         if not timer:

@@ -362,10 +362,6 @@ class EventService:
                 pass
 
     @staticmethod
-    def check_in(event_id: int, user_id: int, pin: str):
-        return {"error": "Self check-in has been removed. Ask event staff to check you in."}, 410
-
-    @staticmethod
     def manual_check_in(event_id: int, user_id: int):
         event = EventRepository.get_event(event_id)
         if not event:
