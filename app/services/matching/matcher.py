@@ -145,7 +145,7 @@ class SpeedDateMatcher:
                 # sort this attendee's compatible dates by fewest rounds participated in then by age difference
                 sorted_compatible_dates = sorted(
                     all_compatible_dates[attendee_id],
-                    key=lambda user: (rounds_completed_per_attendee[user.id], abs(user.calculate_age() - attendee.calculate_age()), SpeedDateMatcher.preference_score(attendee, user)),
+                    key=lambda user: (rounds_completed_per_attendee[user.id], SpeedDateMatcher.preference_score(attendee, user), abs(user.calculate_age() - attendee.calculate_age())),
                 )
 
                 for compatible_date in sorted_compatible_dates:
