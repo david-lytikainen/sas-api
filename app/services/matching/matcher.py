@@ -9,6 +9,22 @@ from sqlalchemy import or_
 
 class SpeedDateMatcher:
     @staticmethod
+    def preference_score(first: User, second: User) -> float:
+        fields = (
+            ("faith_importance", 4),
+            ("traditional_roles_importance", 4),
+            ("boundaries_importance", 4),
+            ("looks_importance", 4),
+            ("wants_kids", 2),
+        )
+        score = 0
+        for field, max_difference in fields:
+            first_value = getattr(first, field)
+            second_value = getattr(second, field)
+            score += 5 if first_value is None or second_value is None else abs(first_value - second_value) * 10 / max_difference
+        return score
+
+    @staticmethod
     def find_all_potential_dates(
         males: List[User],
         females: List[User],
@@ -129,7 +145,7 @@ class SpeedDateMatcher:
                 # sort this attendee's compatible dates by fewest rounds participated in then by age difference
                 sorted_compatible_dates = sorted(
                     all_compatible_dates[attendee_id],
-                    key=lambda user: (rounds_completed_per_attendee[user.id], abs(user.calculate_age() - attendee.calculate_age()),),
+                    key=lambda user: (rounds_completed_per_attendee[user.id], abs(user.calculate_age() - attendee.calculate_age()), SpeedDateMatcher.preference_score(attendee, user)),
                 )
 
                 for compatible_date in sorted_compatible_dates:

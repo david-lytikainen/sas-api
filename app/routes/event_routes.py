@@ -1078,8 +1078,8 @@ def submit_speed_date_selections(event_id):
             if (
                 event_speed_date_id is None
                 or not isinstance(event_speed_date_id, int)
-                or interested is None
-                or not isinstance(interested, bool)
+                or "interested" not in selection_data
+                or (interested is not None and not isinstance(interested, bool))
             ):
                 error_detail = f"Invalid selection format for item: {selection_data}"
                 current_app.logger.warning(
