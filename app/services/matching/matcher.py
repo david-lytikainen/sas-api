@@ -46,10 +46,14 @@ class SpeedDateMatcher:
 
             compatible_dates = [
                 potential_date for potential_date in all_opposite_gender
-                if (abs(attendee.calculate_age() - potential_date.calculate_age()) <= 3)
+                if (
+                    (age_difference := abs(attendee.calculate_age() - potential_date.calculate_age()))
+                    <= (attendee.age_gap if attendee.age_gap is not None else 3)
+                    and age_difference <= (potential_date.age_gap if potential_date.age_gap is not None else 3)
+                )
                     and potential_date.id not in previous_date_user_ids
             ]
-            current_app.logger.info(f"\nInitial len of compatible dates (age diff <= 3): {len(compatible_dates)}")
+            current_app.logger.info(f"\nInitial len of mutually compatible dates: {len(compatible_dates)}")
 
             # If not enough matches, try extended age range
             num_same_gender = (len(females) if attendee.gender == Gender.FEMALE else len(males))
