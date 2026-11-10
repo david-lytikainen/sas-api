@@ -1,7 +1,7 @@
 from datetime import datetime
 from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
-from sqlalchemy import func, text
+from sqlalchemy import text
 from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 from app.models import Event, EventPayment, SchedulerJobRun, User
@@ -90,73 +90,52 @@ def build_billing_summary(organizer_user_id: int):
 
 
 def build_admin_billing_overview():
-    organizer_rows = (
-        db.session.query(
-            User.id,
-            User.first_name,
-            User.last_name,
-            User.email,
-            User.stripe_connect_onboarding_complete,
-            func.coalesce(func.sum(EventPayment.amount_cents), 0),
-            func.coalesce(func.sum(EventPayment.refunded_amount_cents), 0),
+    organizer_rows = db.session.execute(
+        text(
+            """
+            select u.id as organizer_id,
+                   u.email as organizer_email,
+                   coalesce(e.event_count, 0) as event_count,
+                   p.tracked_payment_count,
+                   p.ticket_sales_after_refunds_cents,
+                   p.organizer_transfer_after_refunds_cents,
+                   p.sas_net_after_stripe_cents
+            from users u
+            left join (
+                select creator_id, count(*) as event_count
+                from events
+                group by creator_id
+            ) e on e.creator_id = u.id
+            left join (
+                select organizer_user_id,
+                       count(*) as tracked_payment_count,
+                       sum(greatest(amount_cents - refunded_amount_cents, 0)) as ticket_sales_after_refunds_cents,
+                       sum(case when amount_cents > 0 then round(greatest(amount_cents - refunded_amount_cents, 0)::numeric * greatest(amount_cents - application_fee_cents, 0)::numeric / amount_cents)::integer else 0 end) as organizer_transfer_after_refunds_cents,
+                       sum(case when amount_cents > 0 then round(application_fee_cents::numeric * greatest(amount_cents - refunded_amount_cents, 0)::numeric / amount_cents)::integer else 0 end - stripe_processing_fee_cents) as sas_net_after_stripe_cents
+                from event_payments
+                where payment_status = 'paid'
+                  and application_fee_cents is not null
+                  and stripe_processing_fee_cents is not null
+                group by organizer_user_id
+            ) p on p.organizer_user_id = u.id
+            where u.role_id = 2
+            order by lower(u.email)
+            """
         )
-        .outerjoin(EventPayment, EventPayment.organizer_user_id == User.id)
-        .filter(User.role_id == 2)
-        .group_by(
-            User.id,
-            User.first_name,
-            User.last_name,
-            User.email,
-            User.stripe_connect_onboarding_complete,
-        )
-        .order_by(User.first_name.asc(), User.last_name.asc())
-        .all()
-    )
+    ).mappings().all()
 
     return [
         {
-            "organizer_id": organizer_id,
-            "organizer_name": f"{first_name} {last_name}".strip(),
-            "organizer_email": email,
-            "onboarding_complete": bool(onboarding_complete),
-            "gross_amount": cents_to_dollars(gross_cents),
-            "net_amount": cents_to_dollars(gross_cents - refunded_cents),
+            "organizer_id": row["organizer_id"],
+            "organizer_email": row["organizer_email"],
+            "event_count": row["event_count"],
+            "tracked_payment_count": row["tracked_payment_count"] or 0,
+            "ticket_sales_after_refunds": cents_to_dollars(row["ticket_sales_after_refunds_cents"]),
+            "organizer_transfer_after_refunds": cents_to_dollars(row["organizer_transfer_after_refunds_cents"]),
+            "sas_net_after_stripe": cents_to_dollars(row["sas_net_after_stripe_cents"]),
         }
-        for organizer_id, first_name, last_name, email, onboarding_complete, gross_cents, refunded_cents in organizer_rows
+        for row in organizer_rows
     ]
-
-
-def build_admin_tools_payload():
-    latest_runs = (
-        db.session.query(
-            SchedulerJobRun.job_name,
-            func.max(SchedulerJobRun.created_at).label("latest_created_at"),
-        )
-        .group_by(SchedulerJobRun.job_name)
-        .subquery()
-    )
-
-    latest_status_rows = (
-        db.session.query(SchedulerJobRun)
-        .join(
-            latest_runs,
-            (SchedulerJobRun.job_name == latest_runs.c.job_name)
-            & (SchedulerJobRun.created_at == latest_runs.c.latest_created_at),
-        )
-        .order_by(SchedulerJobRun.job_name.asc())
-        .all()
-    )
-    recent_failures = (
-        SchedulerJobRun.query.filter_by(status="failed")
-        .order_by(SchedulerJobRun.created_at.desc())
-        .limit(5)
-        .all()
-    )
-
-    return {
-        "latest_runs": [serialize_scheduler_run(run) for run in latest_status_rows],
-        "recent_failures": [serialize_scheduler_run(run) for run in recent_failures],
-    }
 
 
 def build_health_payload():
@@ -484,7 +463,6 @@ def user_profile_dashboard():
 
         dashboard = {
             "billing": None,
-            "admin_tools": None,
         }
         if can_view_billing:
             dashboard["billing"] = {
@@ -496,9 +474,6 @@ def user_profile_dashboard():
                 if current_user.role_id == 3
                 else [],
             }
-        if current_user.role_id == 3:
-            dashboard["admin_tools"] = build_admin_tools_payload()
-
         return jsonify(dashboard), 200
     except Exception as e:
         current_app.logger.error(

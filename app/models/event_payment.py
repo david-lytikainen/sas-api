@@ -13,6 +13,8 @@ class EventPayment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     organizer_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     amount_cents = db.Column(db.Integer, nullable=False, default=0)
+    application_fee_cents = db.Column(db.Integer, nullable=True)
+    stripe_processing_fee_cents = db.Column(db.Integer, nullable=True)
     refunded_amount_cents = db.Column(db.Integer, nullable=False, default=0)
     currency = db.Column(db.String(10), nullable=False, default="usd")
     payment_status = db.Column(db.String(50), nullable=False, default="paid")

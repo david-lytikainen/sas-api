@@ -252,6 +252,7 @@ class StripeService:
                 "event_id": str(event.id),
                 "user_id": str(attendee.id),
                 "organizer_user_id": str(organizer.id),
+                "application_fee_cents": str(fee_amount if organizer.role_id != 3 else 0),
             },
         )
         current_app.logger.info(
@@ -293,13 +294,58 @@ class StripeService:
         payment.user_id = int(user_id)
         payment.organizer_user_id = int(organizer_user_id)
         payment.amount_cents = int(session_data.get("amount_total") or 0)
+        if metadata.get("application_fee_cents") is not None:
+            payment.application_fee_cents = int(metadata["application_fee_cents"])
         payment.currency = (session_data.get("currency") or "usd").lower()
         payment.payment_status = session_data.get("payment_status") or "paid"
         payment.registration_status = payment.registration_status or "pending"
 
+        if (
+            payment.payment_status == "paid"
+            and payment.stripe_payment_intent_id
+            and payment.stripe_processing_fee_cents is None
+        ):
+            payment.stripe_processing_fee_cents = StripeService.retrieve_processing_fee_cents(
+                payment.stripe_payment_intent_id
+            )
+
         db.session.add(payment)
         db.session.commit()
         return payment
+
+    @staticmethod
+    def retrieve_processing_fee_cents(payment_intent_id: str) -> int | None:
+        StripeService.require_configured()
+        try:
+            payment_intent = stripe.PaymentIntent.retrieve(
+                payment_intent_id,
+                expand=["latest_charge.balance_transaction"],
+            )
+            charge = payment_intent.get("latest_charge")
+            if isinstance(charge, str):
+                charge = stripe.Charge.retrieve(
+                    charge, expand=["balance_transaction"]
+                )
+            if not charge:
+                return None
+
+            balance_transaction = charge.get("balance_transaction")
+            if isinstance(balance_transaction, str):
+                balance_transaction = stripe.BalanceTransaction.retrieve(
+                    balance_transaction
+                )
+            return (
+                int(balance_transaction.get("fee"))
+                if balance_transaction and balance_transaction.get("fee") is not None
+                else None
+            )
+        except Exception as exc:
+            current_app.logger.warning(
+                "Unable to retrieve Stripe processing fee for PaymentIntent %s: %s",
+                payment_intent_id,
+                exc,
+            )
+            return None
 
     @staticmethod
     def retrieve_checkout_session(session_id: str) -> dict:
