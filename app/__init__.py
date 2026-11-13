@@ -2,8 +2,6 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import sentry_sdk
 from app.extensions import db, jwt
 from app.utils.email import mail
@@ -82,14 +80,6 @@ def create_app():
     )
     app.config["STRIPE_CHECKOUT_CANCEL_URL"] = _require_env(
         "STRIPE_CHECKOUT_CANCEL_URL"
-    )
-
-    # Implement rate limiting using flask-limiter
-    Limiter(
-        get_remote_address,
-        app=app,
-        default_limits=["150 per minute, 10000 per hour, 100000 per day"],
-        strategy="fixed-window",
     )
 
     # Initialize Flask extensions
