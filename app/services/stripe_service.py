@@ -390,6 +390,7 @@ class StripeService:
             int(user_id),
             join_waitlist=False,
             payment_confirmed=True,
+            allow_existing_checkout=True,
         )
 
         if isinstance(registration_response, dict) and "error" in registration_response:

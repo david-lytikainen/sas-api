@@ -108,7 +108,9 @@ class EventService:
         return event
 
     @staticmethod
-    def validate_registration_for_event(event_id: int, user_id: int):
+    def validate_registration_for_event(
+        event_id: int, user_id: int, allow_existing_checkout: bool = False
+    ):
         event = EventRepository.get_event(event_id)
         if not event:
             return None, {"error": f"Event with ID {event_id} not found"}
@@ -122,20 +124,20 @@ class EventService:
             return None, {"error": "You are already registered for this event"}
 
         on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
-        if on_waitlist:
+        if on_waitlist and not allow_existing_checkout:
             return None, {"error": "You are already on the waitlist for this event"}
 
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
-        if attendee_count >= event.max_capacity:
+        if attendee_count >= event.max_capacity and not allow_existing_checkout:
             return None, {"error": "Event is currently full", "waitlist_available": True}
 
         user = UserRepository.find_by_id(user_id)
         if not user:
             return None, {"error": f"User with ID {user_id} not found"}
 
-        if event.enforce_gender_balance:
+        if event.enforce_gender_balance and not allow_existing_checkout:
             same_gender_count = (
                 EventAttendeeRepository.count_by_event_and_status_and_gender(
                     event_id,
@@ -157,9 +159,10 @@ class EventService:
         user_id: int,
         join_waitlist: bool = False,
         payment_confirmed: bool = False,
+        allow_existing_checkout: bool = False,
     ):
         event, validation_error = EventService.validate_registration_for_event(
-            event_id, user_id
+            event_id, user_id, allow_existing_checkout=allow_existing_checkout
         )
         if validation_error:
             if join_waitlist:
@@ -183,6 +186,8 @@ class EventService:
                 "status": RegistrationStatus.REGISTERED,
             }
         )
+        if allow_existing_checkout:
+            EventWaitlistRepository.remove_from_waitlist(event_id, user_id)
         attendee = UserRepository.find_by_id(registration.user_id)
         organizer = UserRepository.find_by_id(event.creator_id)
         if attendee and organizer:
