@@ -368,11 +368,7 @@ class StripeService:
             return {"error": "Checkout session has not been paid."}
 
         payment = StripeService.upsert_checkout_session_payment(session_data)
-        if payment and payment.registration_status in {
-            "registered",
-            "registration_failed_refunded",
-            "refund_failed",
-        }:
+        if payment and payment.registration_status == "registered":
             return {
                 "message": "Checkout session already processed.",
                 "status": payment.registration_status,
@@ -410,37 +406,15 @@ class StripeService:
                 payment.failure_reason = failure_reason
                 db.session.add(payment)
                 db.session.commit()
-                try:
-                    payment = StripeService.refund_payment(payment, failure_reason)
-                    payment.registration_status = "registration_failed_refunded"
-                    db.session.add(payment)
-                    db.session.commit()
-                except Exception as refund_error:
-                    db.session.rollback()
-                    current_app.logger.error(
-                        "Automatic refund failed for checkout session %s: %s",
-                        session_id,
-                        str(refund_error),
-                        exc_info=True,
-                    )
-                    payment = EventPayment.query.filter_by(
-                        stripe_checkout_session_id=session_id
-                    ).first()
-                    if payment:
-                        payment.refund_status = "failed"
-                        payment.registration_status = "refund_failed"
-                        payment.failure_reason = (
-                            f"{failure_reason} | Refund error: {str(refund_error)}"
-                        )
-                        db.session.add(payment)
-                        db.session.commit()
             current_app.logger.warning(
                 "Paid checkout completed but registration failed for user %s event %s: %s",
                 user_id,
                 event_id,
                 failure_reason,
             )
-            return {"error": failure_reason}
+            return {
+                "error": "Payment was received, but registration could not be completed. Please contact the event organizer for help or refund."
+            }
 
         if payment:
             payment.registration_status = "registered"
@@ -458,47 +432,6 @@ class StripeService:
             ),
             "status": "registered",
         }
-
-    @staticmethod
-    def refund_payment(payment: EventPayment, reason: str) -> EventPayment:
-        StripeService.require_configured()
-        if not payment.stripe_payment_intent_id:
-            raise ValueError("Missing Stripe payment intent for refund.")
-
-        refund_kwargs = {
-            "payment_intent": payment.stripe_payment_intent_id,
-            "reason": "requested_by_customer",
-            "metadata": {
-                "event_payment_id": str(payment.id),
-                "event_id": str(payment.event_id),
-                "user_id": str(payment.user_id),
-                "failure_reason": reason[:400],
-            },
-        }
-        organizer = User.query.get(payment.organizer_user_id)
-        if (
-            organizer
-            and organizer.role_id != 3
-            and organizer.stripe_connected_account_id
-        ):
-            refund_kwargs["reverse_transfer"] = True
-            refund_kwargs["refund_application_fee"] = True
-
-        refund = stripe.Refund.create(**refund_kwargs)
-        payment.stripe_refund_id = refund.id
-        payment.refund_status = refund.status
-        payment.refunded_amount_cents = int(refund.amount or 0)
-        payment.registration_status = "registration_failed_refunded"
-        payment.failure_reason = reason
-        db.session.add(payment)
-        db.session.commit()
-        current_app.logger.info(
-            "Refund completed for payment %s, user %s, and event %s.",
-            payment.id,
-            payment.user_id,
-            payment.event_id,
-        )
-        return payment
 
     @staticmethod
     def construct_webhook_event(payload: bytes, sig_header: str):

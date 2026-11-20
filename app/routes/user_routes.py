@@ -33,15 +33,13 @@ def serialize_scheduler_run(run: SchedulerJobRun):
 def build_billing_summary(organizer_user_id: int):
     payments = EventPayment.query.filter_by(organizer_user_id=organizer_user_id).all()
     gross_cents = sum(payment.amount_cents for payment in payments)
-    refunded_cents = sum(payment.refunded_amount_cents for payment in payments)
     successful_registrations = sum(
         1 for payment in payments if payment.registration_status == "registered"
     )
-    refund_failures = sum(1 for payment in payments if payment.refund_status == "failed")
     payment_mismatches = sum(
         1
         for payment in payments
-        if payment.registration_status in {"registration_failed", "refund_failed"}
+        if payment.registration_status == "registration_failed"
     )
 
     event_ids = {payment.event_id for payment in payments}
@@ -72,7 +70,6 @@ def build_billing_summary(organizer_user_id: int):
             "amount": cents_to_dollars(payment.amount_cents),
             "payment_status": payment.payment_status,
             "registration_status": payment.registration_status,
-            "refund_status": payment.refund_status,
             "created_at": payment.created_at.isoformat() if payment.created_at else None,
         }
         for payment in recent_payments
@@ -80,10 +77,7 @@ def build_billing_summary(organizer_user_id: int):
 
     return {
         "gross_amount": cents_to_dollars(gross_cents),
-        "refunded_amount": cents_to_dollars(refunded_cents),
-        "net_amount": cents_to_dollars(gross_cents - refunded_cents),
         "successful_registrations": successful_registrations,
-        "refund_failures": refund_failures,
         "payment_mismatches": payment_mismatches,
         "recent_activity": recent_activity,
     }
@@ -97,8 +91,8 @@ def build_admin_billing_overview():
                    u.email as organizer_email,
                    coalesce(e.event_count, 0) as event_count,
                    p.tracked_payment_count,
-                   p.ticket_sales_after_refunds_cents,
-                   p.organizer_transfer_after_refunds_cents,
+                   p.ticket_sales_cents,
+                   p.organizer_transfer_cents,
                    p.sas_net_after_stripe_cents
             from users u
             left join (
@@ -109,9 +103,9 @@ def build_admin_billing_overview():
             left join (
                 select organizer_user_id,
                        count(*) as tracked_payment_count,
-                       sum(greatest(amount_cents - refunded_amount_cents, 0)) as ticket_sales_after_refunds_cents,
-                       sum(case when amount_cents > 0 then round(greatest(amount_cents - refunded_amount_cents, 0)::numeric * greatest(amount_cents - application_fee_cents, 0)::numeric / amount_cents)::integer else 0 end) as organizer_transfer_after_refunds_cents,
-                       sum(case when amount_cents > 0 then round(application_fee_cents::numeric * greatest(amount_cents - refunded_amount_cents, 0)::numeric / amount_cents)::integer else 0 end - stripe_processing_fee_cents) as sas_net_after_stripe_cents
+                       sum(amount_cents) as ticket_sales_cents,
+                       sum(greatest(amount_cents - application_fee_cents, 0)) as organizer_transfer_cents,
+                       sum(application_fee_cents - stripe_processing_fee_cents) as sas_net_after_stripe_cents
                 from event_payments
                 where payment_status = 'paid'
                   and application_fee_cents is not null
@@ -130,8 +124,8 @@ def build_admin_billing_overview():
             "organizer_email": row["organizer_email"],
             "event_count": row["event_count"],
             "tracked_payment_count": row["tracked_payment_count"] or 0,
-            "ticket_sales_after_refunds": cents_to_dollars(row["ticket_sales_after_refunds_cents"]),
-            "organizer_transfer_after_refunds": cents_to_dollars(row["organizer_transfer_after_refunds_cents"]),
+            "ticket_sales": cents_to_dollars(row["ticket_sales_cents"]),
+            "organizer_transfer": cents_to_dollars(row["organizer_transfer_cents"]),
             "sas_net_after_stripe": cents_to_dollars(row["sas_net_after_stripe_cents"]),
         }
         for row in organizer_rows
