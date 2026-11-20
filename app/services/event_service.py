@@ -114,7 +114,10 @@ class EventService:
         event = EventRepository.get_event(event_id)
         if not event:
             return None, {"error": f"Event with ID {event_id} not found"}
-        if event.status != EventStatus.REGISTRATION_OPEN.value:
+        if (
+            event.status != EventStatus.REGISTRATION_OPEN.value
+            and not allow_existing_checkout
+        ):
             return None, {"error": "Event is not open for registration"}
 
         existing_registration = EventAttendeeRepository.find_by_event_and_user(
