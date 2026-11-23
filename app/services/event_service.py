@@ -12,6 +12,7 @@ from app.models.enums import EventStatus, Gender, RegistrationStatus
 from app.repositories.event_attendee_repository import EventAttendeeRepository
 from app.repositories.event_repository import EventRepository
 from app.repositories.event_waitlist_repository import EventWaitlistRepository
+from app.repositories.walkin_attendee_repository import WalkInAttendeeRepository
 from app.repositories.user_repository import UserRepository
 from app.services.stripe_service import StripeService
 from app.utils.email import send_event_completed_email, send_event_registration_confirmation_email, send_event_reminder_email, send_waitlist_spot_open_email
@@ -114,6 +115,7 @@ class EventService:
         event = EventRepository.get_event(event_id)
         if not event:
             return None, {"error": f"Event with ID {event_id} not found"}
+        is_walkin = WalkInAttendeeRepository.has_access(event_id, user_id)
         if (
             event.status != EventStatus.REGISTRATION_OPEN.value
             and not allow_existing_checkout
@@ -129,14 +131,14 @@ class EventService:
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
-        if attendee_count >= event.max_capacity and not allow_existing_checkout:
+        if attendee_count >= event.max_capacity and not allow_existing_checkout and not is_walkin:
             return None, {"error": "Event is currently full", "waitlist_available": True}
 
         user = UserRepository.find_by_id(user_id)
         if not user:
             return None, {"error": f"User with ID {user_id} not found"}
 
-        if event.enforce_gender_balance and not allow_existing_checkout:
+        if event.enforce_gender_balance and not allow_existing_checkout and not is_walkin:
             same_gender_count = (
                 EventAttendeeRepository.count_by_event_and_status_and_gender(
                     event_id,

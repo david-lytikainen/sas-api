@@ -9,8 +9,11 @@ from app.models.enums import EventStatus, RegistrationStatus, UserRole, Gender
 from app.extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from flask_cors import cross_origin
+from sqlalchemy import text
+from types import SimpleNamespace
 from app.exceptions import UnauthorizedError, MissingFieldsError
 from app.services.event_service import EventService
+from app.repositories.walkin_attendee_repository import WalkInAttendeeRepository
 from app.services.speed_date_service import SpeedDateService
 from app.services.stripe_service import StripeService
 from datetime import datetime, timedelta, timezone
@@ -173,6 +176,10 @@ def get_events():
                 ),
                 "check_in_date": None,
             }
+
+    walkin_event_ids = WalkInAttendeeRepository.get_event_ids_for_user(user_id)
+    for event_data in events_data:
+        event_data["walkin_allowed"] = event_data["id"] in walkin_event_ids
 
     final_registrations_data = list(registrations_map.values())
 
@@ -565,6 +572,67 @@ def update_event_status(event_id):
             exc_info=True,
         )
         return jsonify({"error": f"Error updating status: {str(e)}"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/walk-in-users", methods=["GET"])
+@jwt_required()
+def search_walkin_users(event_id):
+    try:
+        event_row = db.session.execute(text("select id, creator_id, status, price_per_person from events where id = :event_id"), {"event_id": event_id}).mappings().first()
+        if not event_row:
+            return jsonify({"error": "Event not found"}), 404
+        user_row = db.session.execute(text("select id, role_id, stripe_connect_onboarding_complete from users where id = :user_id"), {"user_id": get_jwt_identity()}).mappings().first()
+        event = SimpleNamespace(**dict(event_row))
+        current_user = SimpleNamespace(**dict(user_row)) if user_row else None
+        if not current_user_can_manage_event(current_user, event):
+            return jsonify({"error": "Unauthorized to add walk-in attendees"}), 403
+        if event.status != EventStatus.REGISTRATION_OPEN.value or float(event.price_per_person or 0) <= 0:
+            return jsonify({"error": "Walk-in signup is unavailable for this event"}), 400
+
+        search = request.args.get("q", "").strip()
+        if not search:
+            return jsonify([]), 200
+
+        return jsonify(WalkInAttendeeRepository.search_users(event_id, search)), 200
+    except Exception as e:
+        current_app.logger.error("Error searching users for walk-in: %s", str(e), exc_info=True)
+        return jsonify({"error": "Failed to search users"}), 500
+
+
+@event_bp.route("/events/<int:event_id>/walk-ins", methods=["POST"])
+@jwt_required()
+def add_walkin_attendee(event_id):
+    try:
+        event_row = db.session.execute(text("select id, creator_id, status, price_per_person from events where id = :event_id"), {"event_id": event_id}).mappings().first()
+        if not event_row:
+            return jsonify({"error": "Event not found"}), 404
+        user_row = db.session.execute(text("select id, role_id, stripe_connect_onboarding_complete from users where id = :user_id"), {"user_id": get_jwt_identity()}).mappings().first()
+        event = SimpleNamespace(**dict(event_row))
+        current_user = SimpleNamespace(**dict(user_row)) if user_row else None
+        if not current_user_can_manage_event(current_user, event):
+            return jsonify({"error": "Unauthorized to add walk-in attendees"}), 403
+        if event.status != EventStatus.REGISTRATION_OPEN.value:
+            return jsonify({"error": "Walk-in signups are only available while registration is open"}), 400
+        if not event.price_per_person or float(event.price_per_person) <= 0:
+            return jsonify({"error": "Walk-in attendees require a paid event"}), 400
+
+        data = request.get_json() or {}
+        user_id = data.get("user_id")
+        if not isinstance(user_id, int):
+            return jsonify({"error": "A valid user_id is required"}), 400
+        attendee = db.session.execute(text("select id, first_name from users where id = :user_id"), {"user_id": user_id}).mappings().first()
+        if not attendee:
+            return jsonify({"error": "User not found"}), 404
+        existing_attendee = db.session.execute(text("select id from events_attendees where event_id = :event_id and user_id = :user_id"), {"event_id": event_id, "user_id": user_id}).first()
+        if existing_attendee:
+            return jsonify({"error": "This user is already registered for the event"}), 409
+
+        WalkInAttendeeRepository.grant_access(event_id, user_id)
+        return jsonify({"message": "Walk-in signup access added", "first_name": attendee["first_name"]}), 201
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error("Error adding walk-in attendee: %s", str(e), exc_info=True)
+        return jsonify({"error": "Failed to add walk-in attendee"}), 500
 
 
 @event_bp.route("/events/<int:event_id>/attendees", methods=["GET", "OPTIONS"])
