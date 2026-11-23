@@ -1,5 +1,5 @@
 from app.extensions import db
-from .enums import RegistrationStatus
+from sqlalchemy import text
 
 
 class Event(db.Model):
@@ -37,17 +37,21 @@ class Event(db.Model):
     )
 
     def to_dict(self):
-        from .event_attendee import EventAttendee
-
-        registered_attendee_count = (
-            EventAttendee.query.filter(EventAttendee.event_id == self.id)
-            .filter(
-                EventAttendee.status.in_(
-                    [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
-                )
-            )
-            .count()
-        )
+        attendee_counts = db.session.execute(
+            text("""
+                select users.gender, count(*) as attendee_count
+                from events_attendees
+                join users on users.id = events_attendees.user_id
+                where events_attendees.event_id = :event_id
+                    and events_attendees.status in ('REGISTERED', 'CHECKED_IN')
+                group by users.gender
+            """),
+            {"event_id": self.id},
+        ).mappings().all()
+        counts_by_gender = {
+            row["gender"]: row["attendee_count"] for row in attendee_counts
+        }
+        registered_attendee_count = sum(counts_by_gender.values())
         return {
             "id": self.id,
             "name": self.name,
@@ -67,6 +71,8 @@ class Event(db.Model):
                 else None
             ),
             "registered_attendee_count": registered_attendee_count,
+            "registered_male_count": counts_by_gender.get("MALE", 0),
+            "registered_female_count": counts_by_gender.get("FEMALE", 0),
             "num_rounds": self.num_rounds,
             "num_tables": self.num_tables,
         }

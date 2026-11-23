@@ -126,10 +126,6 @@ class EventService:
         if existing_registration:
             return None, {"error": "You are already registered for this event"}
 
-        on_waitlist = EventWaitlistRepository.find_by_event_and_user(event_id, user_id)
-        if on_waitlist and not allow_existing_checkout:
-            return None, {"error": "You are already on the waitlist for this event"}
-
         attendee_count = EventAttendeeRepository.count_by_event_id_and_status(
             event_id, [RegistrationStatus.REGISTERED, RegistrationStatus.CHECKED_IN]
         )
@@ -189,8 +185,7 @@ class EventService:
                 "status": RegistrationStatus.REGISTERED,
             }
         )
-        if allow_existing_checkout:
-            EventWaitlistRepository.remove_from_waitlist(event_id, user_id)
+        EventWaitlistRepository.remove_from_waitlist(event_id, user_id)
         attendee = UserRepository.find_by_id(registration.user_id)
         organizer = UserRepository.find_by_id(event.creator_id)
         if attendee and organizer:
