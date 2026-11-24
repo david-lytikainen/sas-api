@@ -52,6 +52,10 @@ class Event(db.Model):
             row["gender"]: row["attendee_count"] for row in attendee_counts
         }
         registered_attendee_count = sum(counts_by_gender.values())
+        waitlist_count = db.session.execute(
+            text("select count(*) from event_waitlists where event_id = :event_id"),
+            {"event_id": self.id},
+        ).scalar() or 0
         return {
             "id": self.id,
             "name": self.name,
@@ -73,6 +77,7 @@ class Event(db.Model):
             "registered_attendee_count": registered_attendee_count,
             "registered_male_count": counts_by_gender.get("MALE", 0),
             "registered_female_count": counts_by_gender.get("FEMALE", 0),
+            "waitlist_count": waitlist_count,
             "num_rounds": self.num_rounds,
             "num_tables": self.num_tables,
         }
