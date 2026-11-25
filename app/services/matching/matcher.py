@@ -9,7 +9,7 @@ from sqlalchemy import or_
 
 class SpeedDateMatcher:
     @staticmethod
-    def preference_score(first: User, second: User) -> float:
+    def golf_score(first: User, second: User) -> float:
         fields = (
             ("faith_importance", 4),
             ("traditional_roles_importance", 4),
@@ -145,7 +145,7 @@ class SpeedDateMatcher:
                 # sort this attendee's compatible dates by fewest rounds participated in then by age difference
                 sorted_compatible_dates = sorted(
                     all_compatible_dates[attendee_id],
-                    key=lambda user: (rounds_completed_per_attendee[user.id], abs(user.calculate_age() - attendee.calculate_age()), SpeedDateMatcher.preference_score(attendee, user)),
+                    key=lambda user: (rounds_completed_per_attendee[user.id], abs(user.calculate_age() - attendee.calculate_age()), SpeedDateMatcher.golf_score(attendee, user)),
                 )
 
                 for compatible_date in sorted_compatible_dates:
