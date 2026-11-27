@@ -114,7 +114,6 @@ class StripeService:
                 },
             },
             business_profile={
-                "mcc": "7999",
                 "product_description": "Hosting a speed dating event",
                 **(
                     {"url": current_app.config.get("CLIENT_URL")}
